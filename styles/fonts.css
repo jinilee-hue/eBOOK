@@ -1,0 +1,43 @@
+/* ══════════════════════════════════════════════════════════════
+   fonts.css — SIL Andika 7.000 자체 호스팅
+   출처: github.com/silnrsi/font-andika (v7.000) · OFL 1.1
+   고지문: assets/fonts/OFL.txt · assets/fonts/FONTLOG.txt
+
+   ── 패밀리 이름을 'Andika SIL'로 따로 둔 이유
+   같은 'Andika' 이름으로 선언하면 파일이 없을 때 구글 폰트로 되돌아가지 않고
+   sans-serif까지 떨어진다(같은 family+weight는 뒤 선언이 이기고, 그게 404면 끝).
+   이름을 분리해 두면 --read의 다음 후보인 구글 'Andika'가 폴백을 받아 준다.
+
+   ── 1층 a·g 에 대하여 (확인 완료, 재논의 불필요)
+   SIL Andika는 **기본값이 이미 1층 a·g** 다. 손으로 쓰는 글자 모양이 기본이다.
+     cmap: U+0061 → a.SngStory,  U+0067 → g.SngBowl
+   OpenType 'ss01'은 그 반대로 2층으로 바꾸는 기능이다.
+     GSUB ss01 lookup: a.SngStory → a,  g.SngBowl → g
+   따라서 font-feature-settings로 아무것도 켜지 않는다. 켜면 오히려 망가진다.
+   ('ss02'는 이 폰트에 존재하지도 않는다. ss04/ss05는 이탤릭 2층 a 관련이다.)
+
+   ── Medium(500)을 함께 넣은 이유
+   어두운 반투명 패널 위에서 Andika 400은 획이 가늘어 흐려진다.
+   CLAUDE.md가 밝은 패널을 확정한 사유가 바로 그것이었다.
+   다크 패널에서는 tokens.css가 --wt를 500으로 올려 이 문제를 상쇄한다.
+
+   ── 이탤릭은 넣지 않았다
+   본문 데이터에 이탤릭이 없고, 운율 쪽은 Fraunces를 쓴다. 필요해지면
+   Andika-Italic.woff2를 같은 방식으로 추가할 것.
+   ══════════════════════════════════════════════════════════════ */
+
+@font-face{
+  font-family:'Andika SIL';
+  src:url('../assets/fonts/Andika-Regular.woff2') format('woff2');
+  font-weight:400; font-style:normal; font-display:swap;
+}
+@font-face{
+  font-family:'Andika SIL';
+  src:url('../assets/fonts/Andika-Medium.woff2') format('woff2');
+  font-weight:500; font-style:normal; font-display:swap;
+}
+@font-face{
+  font-family:'Andika SIL';
+  src:url('../assets/fonts/Andika-Bold.woff2') format('woff2');
+  font-weight:700; font-style:normal; font-display:swap;
+}
