@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Millions of Cats — v5</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Andika:ital,wght@0,400;0,700;1,400&family=Lexend:wght@300..700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700&family=Fraunces:opsz,wght,SOFT,WONK@9..144,600;9..144,700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════
+   v5 — 신규: 우측 본문 패널 접기/펴기
+   접으면 배경 영상이 화면 전체로. 읽어주기·문제 흐름은 유지.
+   ══════════════════════════════════════════════════════════ */
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:#000;
+  font-family:'Pretendard',sans-serif;-webkit-font-smoothing:antialiased;
+  -webkit-text-size-adjust:100%;touch-action:manipulation}
+
+:root{
+  --act:#0066ff; --ok:#2ecc71;
+  --paper:#f7f3e9; --ink:#1b1c21;
+  --pad:18px;
+}
+[data-f="lexend"]  {--read:'Lexend',sans-serif; --tk:0;     --lh:1.72}
+[data-f="atkinson"]{--read:'Atkinson Hyperlegible',sans-serif; --tk:0; --lh:1.75}
+[data-f="andika"]  {--read:'Andika',sans-serif; --tk:.005em;--lh:1.75}
+[data-w="400"]{--wt:400} [data-w="700"]{--wt:700}
+
+/* 패널 명암 */
+[data-panel="dark"] {--pnl:rgba(14,16,20,.9); --pln:rgba(255,255,255,.09);
+  --txt:rgba(255,255,255,.93); --soft:rgba(255,255,255,.06); --softer:rgba(255,255,255,.14);
+  --dimA:.72}
+[data-panel="light"]{--pnl:var(--paper); --pln:rgba(27,28,33,.12);
+  --txt:var(--ink); --soft:rgba(27,28,33,.05); --softer:rgba(27,28,33,.15);
+  --dimA:.5}
+
+#stage{position:fixed;inset:0;overflow:hidden;transform-origin:center center}
+body.sim #stage{inset:auto;left:50%;top:50%;border-radius:14px;
+  box-shadow:0 0 0 8px #2a2c33,0 30px 80px rgba(0,0,0,.6)}
+
+/* ── 배경 ── */
+#bg{position:absolute;inset:0;z-index:0;background:#181a1e;overflow:hidden}
+#bg-ph{position:absolute;inset:5%;border:2px dashed rgba(255,255,255,.18);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
+  text-align:center;color:rgba(255,255,255,.38);
+  background:repeating-linear-gradient(135deg,rgba(255,255,255,.03) 0 14px,transparent 14px 28px);
+  animation:drift 20s ease-in-out infinite alternate}
+@keyframes drift{from{transform:scale(1)}to{transform:scale(1.05) translateX(-1.5%)}}
+#bg-ph b{font-size:11px;letter-spacing:.18em;color:rgba(255,255,255,.48)}
+#bg-ph .scene{font-size:19px;color:rgba(255,255,255,.68);font-weight:600;padding:0 20px}
+#bg-ph .note{font-size:11px;line-height:1.6;max-width:340px;padding:0 20px}
+#dim{position:absolute;inset:0;z-index:1;background:rgba(0,0,0,var(--dimA));transition:background .4s}
+
+/* ══ 그리드 ══ */
+#app{position:absolute;inset:0;z-index:2;display:grid;padding:var(--pad);gap:10px;
+  grid-template-columns:1fr minmax(0,46%);
+  grid-template-rows:auto minmax(0,1fr) auto auto;
+  grid-template-areas:"bar bar" ". read" "ctl ctl" "quiz quiz";
+  transition:grid-template-columns .45s cubic-bezier(.22,1,.36,1)}
+/* 접힘 */
+[data-read="off"] #app{grid-template-columns:1fr 0}
+[data-read="off"] #read{opacity:0;transform:translateX(24px);pointer-events:none}
+@media(orientation:portrait){
+  body:not(.sim) #app{grid-template-columns:1fr;
+    grid-template-areas:"bar" "read" "ctl" "quiz"}
+  body:not(.sim)[data-read="off"] #app{grid-template-rows:auto 0 auto auto}
+}
+
+#topbar{grid-area:bar;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  color:rgba(255,255,255,.62);font-size:11.5px;min-height:26px}
+#topbar .title{font-family:'Fraunces',serif;font-size:15px;font-weight:600;color:rgba(255,255,255,.9)}
+#tright{display:flex;align-items:center;gap:12px}
+#pills{display:flex;gap:4px}
+.pill{width:18px;height:5px;border-radius:99px;background:rgba(255,255,255,.2)}
+.pill.done{background:var(--act)} .pill.now{background:rgba(255,255,255,.55)}
+#wcount{padding:4px 10px;border-radius:99px;background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.12);font-size:11px;color:rgba(255,255,255,.72)}
+
+/* ── 본문 패널 (접힘 대상) ── */
+#read{grid-area:read;min-width:0;min-height:0;overflow:hidden;border-radius:12px;
+  padding:18px 20px;background:var(--pnl);border:1px solid var(--pln);color:var(--txt);
+  transition:opacity .35s ease,transform .45s cubic-bezier(.22,1,.36,1),background .4s,color .4s}
+.body{height:100%;font-family:var(--read);letter-spacing:var(--tk);font-weight:var(--wt,400)}
+.sent{display:block;padding:9px 12px;margin-bottom:6px;border-radius:8px;cursor:pointer;
+  background:var(--soft);border-left:3px solid var(--softer);transition:background .15s,border-color .15s}
+.sent.speaking{border-left-color:var(--act);background:rgba(0,102,255,.15)}
+.rhyme{font-family:'Fraunces',serif;font-variation-settings:'SOFT' 60,'WONK' 1;font-weight:600}
+.w{cursor:pointer;border-bottom:2px dotted var(--softer);padding:2px 0}
+.w.saved{border-bottom-color:var(--act);color:var(--act)}
+[data-panel="dark"] .w{border-bottom-color:rgba(255,255,255,.45)}
+[data-panel="dark"] .w.saved{color:#8fc0ff}
+
+/* ── 컨트롤 바 (항상 보임) ── */
+#ctl{grid-area:ctl;justify-self:end;display:flex;align-items:center;gap:10px;
+  padding:8px 10px 8px 14px;border-radius:99px;
+  background:var(--pnl);border:1px solid var(--pln);color:var(--txt);transition:background .4s,color .4s}
+#fold{padding:9px 15px;border-radius:99px;border:1.5px solid var(--softer);
+  background:transparent;color:inherit;font-family:'Pretendard';font-size:12.5px;
+  font-weight:600;cursor:pointer;min-height:40px;white-space:nowrap}
+#play{width:40px;height:40px;border-radius:50%;border:1.5px solid var(--softer);
+  background:transparent;color:inherit;cursor:pointer;font-size:12px;flex:0 0 auto}
+#beats{display:flex;gap:5px;padding:0 2px}
+.bdot{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.22}
+.bdot.on{opacity:.85}
+#go{padding:11px 22px;border:none;border-radius:99px;min-height:44px;
+  font-size:13.5px;font-weight:600;cursor:pointer;background:var(--act);color:#fff;white-space:nowrap}
+#go.wait{background:var(--soft);color:var(--txt);opacity:.45;cursor:default}
+
+/* ── 하단 띠: 문제 ── */
+#quiz{grid-area:quiz;min-width:0;border-radius:12px;overflow:hidden;
+  background:var(--pnl);border:1px solid var(--pln);color:var(--txt);
+  display:flex;flex-direction:column;gap:12px;padding:15px 20px;
+  transition:max-height .42s cubic-bezier(.22,1,.36,1),opacity .3s,padding .3s,background .4s,color .4s;
+  max-height:340px}
+[data-q="hidden"] #quiz{max-height:0;opacity:0;padding-top:0;padding-bottom:0;border-width:0}
+[data-q="ask"] #quiz{cursor:pointer}
+[data-q="ask"] #opts,[data-q="ask"] #next{display:none}
+#qhead{display:flex;align-items:center;gap:14px}
+.q-text{flex:1;font-family:var(--read);letter-spacing:var(--tk);font-size:20px;line-height:1.45;font-weight:600}
+#qcue{flex:0 0 auto;font-size:12px;opacity:.55;display:flex;align-items:center;gap:6px;white-space:nowrap}
+#qcue .chev{display:inline-block;transition:transform .3s}
+[data-q="open"] #qcue .chev{transform:rotate(180deg)}
+[data-q="open"] #qcue{opacity:.28}
+#qrow{display:flex;align-items:stretch;gap:12px}
+#opts{flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+.opt{display:flex;align-items:center;gap:9px;padding:12px 13px;border-radius:11px;
+  font-family:var(--read);letter-spacing:var(--tk);font-size:16px;line-height:1.35;
+  cursor:pointer;min-height:56px;border:1.5px solid transparent;background:var(--soft);
+  transition:background .18s,border-color .18s;animation:optIn .34s ease both}
+.opt:nth-child(2){animation-delay:.05s}.opt:nth-child(3){animation-delay:.1s}.opt:nth-child(4){animation-delay:.15s}
+@keyframes optIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.opt .k{flex:0 0 25px;height:25px;border-radius:50%;font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;font-family:'Pretendard';
+  background:var(--softer);color:var(--txt)}
+.opt.correct{border-color:var(--ok);background:rgba(46,204,113,.18)}
+.opt.correct .k{background:var(--ok);color:#fff}
+.opt.wrong{animation:shake .35s ease}
+@keyframes shake{20%{transform:translateX(-5px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
+#next{flex:0 0 auto;padding:12px 26px;border:none;border-radius:99px;min-height:56px;
+  font-size:14.5px;font-weight:600;background:var(--soft);color:var(--txt);opacity:.45}
+#next.on{background:var(--act);color:#fff;cursor:pointer;opacity:1}
+
+/* ══ 밝은 모달 ══ */
+#scrim{position:fixed;inset:0;z-index:80;background:rgba(4,6,12,.62);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;padding:24px;
+  opacity:0;pointer-events:none;transition:opacity .24s}
+#scrim.on{opacity:1;pointer-events:auto}
+#modal{width:min(560px,100%);max-height:86vh;overflow:auto;background:var(--paper);
+  color:var(--ink);border-radius:20px;box-shadow:0 30px 90px rgba(0,0,0,.5);position:relative;
+  transform:scale(.94) translateY(10px);transition:transform .28s cubic-bezier(.22,1,.36,1)}
+#scrim.on #modal{transform:none}
+#modal::before{content:'';position:absolute;top:0;left:0;right:0;height:5px;
+  background:var(--act);border-radius:20px 20px 0 0}
+.m-pad{padding:30px 32px 26px}
+.m-kind{font-size:11px;letter-spacing:.16em;color:#5c5e68;margin-bottom:14px}
+.m-word{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.m-word .term{font-family:var(--read);letter-spacing:var(--tk);font-size:42px;font-weight:700;line-height:1.1}
+.m-say{width:46px;height:46px;border-radius:50%;border:none;background:var(--act);color:#fff;
+  font-size:15px;cursor:pointer;flex:0 0 auto}
+.m-mean{font-size:25px;font-weight:600;margin-top:14px;line-height:1.45}
+.m-sent{font-family:var(--read);letter-spacing:var(--tk);font-size:21px;line-height:1.65}
+.m-rule{height:1px;background:rgba(27,28,33,.13);margin:22px 0 18px}
+.m-lab{font-size:12px;color:#5c5e68;margin-bottom:8px}
+.m-ctx{font-family:var(--read);letter-spacing:var(--tk);font-size:17px;line-height:1.62;color:#5c5e68}
+.m-ctx mark{background:rgba(0,102,255,.16);color:var(--ink);border-radius:3px;padding:1px 2px;font-weight:700}
+.m-ko{font-size:16px;line-height:1.65;color:#5c5e68;margin-top:8px}
+.m-foot{display:flex;gap:10px;padding:0 32px 28px}
+.m-btn{flex:1;padding:15px;border-radius:13px;border:none;font-family:'Pretendard';
+  font-size:15px;font-weight:600;cursor:pointer;min-height:54px}
+.m-save{background:rgba(0,102,255,.1);color:var(--act);border:1.5px solid rgba(0,102,255,.3)}
+.m-save.on{background:var(--act);color:#fff;border-color:var(--act)}
+.m-close{background:var(--ink);color:var(--paper)}
+
+/* 게이트 */
+#gate{position:absolute;inset:0;z-index:30;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;background:rgba(6,8,14,.88);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);cursor:pointer;transition:opacity .5s}
+#gate.off{opacity:0;pointer-events:none}
+#gate h1{font-family:'Fraunces',serif;font-size:40px;font-weight:700;color:#fff}
+#gate p{font-size:13px;color:rgba(255,255,255,.5)}
+
+/* 검증 패널 */
+#dev{position:fixed;left:12px;bottom:12px;z-index:70;width:252px;
+  background:rgba(10,11,15,.94);border:1px solid rgba(255,255,255,.14);border-radius:12px;
+  padding:11px 12px;color:#fff;font-size:11px;line-height:1.5}
+#dev h4{font-size:9px;letter-spacing:.15em;color:rgba(255,255,255,.4);margin-bottom:6px;font-weight:600}
+#dev .row{display:flex;gap:4px;margin-bottom:6px}
+#dev button{flex:1;padding:6px 2px;border-radius:6px;cursor:pointer;
+  border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#fff;
+  font-family:'Pretendard';font-size:10.5px}
+#dev button.sel{background:var(--act);border-color:var(--act)}
+#meter{border-top:1px solid rgba(255,255,255,.12);padding-top:8px;font-size:11px}
+#meter .ok{color:#5de899} #meter .warn{color:#ffcf5a}
+#meter .hint{color:rgba(255,255,255,.42);font-size:10px;margin-top:4px;line-height:1.45}
+#devtoggle{position:fixed;left:12px;bottom:12px;z-index:71;display:none;padding:9px 13px;
+  border-radius:99px;background:rgba(10,11,15,.9);color:#fff;
+  border:1px solid rgba(255,255,255,.2);font-size:11px}
+body.hidedev #dev{display:none} body.hidedev #devtoggle{display:block}
+@media(prefers-reduced-motion:reduce){#bg-ph{animation:none}.opt{animation:none}
+  #app,#read,#modal{transition:none}}
+</style>
+</head>
+<body data-f="andika" data-panel="light" data-w="400">
+
+<div id="stage">
+  <div id="bg"><div id="bg-ph">
+    <b>BACKGROUND PLACEHOLDER</b><div class="scene">—</div><div class="note">—</div>
+  </div></div>
+  <div id="dim"></div>
+
+  <div id="app" data-q="hidden" data-read="on">
+    <div id="topbar">
+      <span class="title">Millions of Cats</span>
+      <div id="tright">
+        <div id="pills"></div>
+        <span id="wcount">단어장 0</span>
+        <span id="pnum">—</span>
+      </div>
+    </div>
+
+    <div id="read"><div class="body" id="body"></div></div>
+
+    <div id="ctl">
+      <button id="fold">책 접기</button>
+      <button id="play">▶</button>
+      <div id="beats"></div>
+      <button id="go" class="wait">읽는 중…</button>
+    </div>
+
+    <div id="quiz">
+      <div id="qhead">
+        <div class="q-text" id="qtext"></div>
+        <div id="qcue">눌러서 보기 <span class="chev">▾</span></div>
+      </div>
+      <div id="qrow">
+        <div id="opts"></div>
+        <button id="next" disabled>다음 쪽</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="gate"><h1>Millions of Cats</h1><p>화면을 누르면 시작합니다</p></div>
+</div>
+
+<div id="scrim">
+  <div id="modal" role="dialog" aria-modal="true">
+    <div class="m-pad">
+      <div class="m-kind" id="m-kind"></div>
+      <div id="m-top"></div>
+      <div id="m-ctxwrap">
+        <div class="m-rule"></div>
+        <div class="m-lab">이야기 속에서</div>
+        <div class="m-ctx" id="m-ctx"></div>
+        <div class="m-ko" id="m-ko"></div>
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="m-btn m-save" id="m-save">단어장에 담기</button>
+      <button class="m-btn m-close" id="m-close">닫기</button>
+    </div>
+  </div>
+</div>
+
+<button id="devtoggle">검증 패널</button>
+<div id="dev">
+  <h4>L2 하단띠 · 접기/펴기</h4>
+  <div class="row" id="fsw">
+    <button data-f="andika" class="sel">Andika</button>
+    <button data-f="atkinson">Atkinson</button>
+    <button data-f="lexend">Lexend</button>
+  </div>
+  <div class="row" id="wsw">
+    <button data-w="400" class="sel">보통 400</button>
+    <button data-w="700">굵게 700</button>
+  </div>
+  <div class="row" id="nsw">
+    <button data-n="light" class="sel">밝은 패널</button>
+    <button data-n="dark">어두운 패널</button>
+  </div>
+  <div class="row" id="psw">
+    <button data-p="0" class="sel">P01</button><button data-p="1">P05 운율</button><button data-p="2">P11 최장</button>
+  </div>
+  <div class="row" id="ssw">
+    <button data-s="0" class="sel">실제 창</button><button data-s="1">iPad 1194</button><button data-s="2">iPad 1024</button>
+  </div>
+  <div id="meter"></div>
+</div>
+
+<script>
+/* 원문: Project Gutenberg #74181 (Wanda Gág, 1928) — public domain in the USA */
+const PAGES=[
+{n:1,scene:'꽃에 둘러싸인 오두막 · 해질녘',
+ note:'절차적 씬: 낮은 구름이 흐르고 창에 등불이 켜짐. mp4가 있으면 대체 재생.',
+ lines:[
+ {t:'Once upon a time there was a very old man and a very old woman.',ko:'옛날 옛적에 아주 나이 많은 할아버지와 아주 나이 많은 할머니가 살았습니다.'},
+ {t:'They lived in a nice clean house which had flowers all around it, except where the door was.',ko:'두 사람은 문이 있는 자리만 빼고 온통 꽃으로 둘러싸인, 깨끗하고 아담한 집에 살았습니다.'},
+ {t:"But they couldn't be happy because they were so very lonely.",ko:'하지만 두 사람은 너무나 외로워서 행복할 수가 없었습니다.'}],
+ q:'Why were the old man and the old woman unhappy?',
+ o:['Their house was too small','They were very lonely','They had too many cats','The flowers would not grow'],a:1},
+
+{n:5,rhyme:true,scene:'수백만 마리가 뒤덮은 언덕',
+ note:'절차적 씬: 실루엣 고양이가 언덕을 채우며 끝없이 증식. 이 쪽은 배경이 주인공.',
+ lines:[
+ {t:'Cats here, cats there,',ko:'여기도 고양이, 저기도 고양이,'},
+ {t:'Cats and kittens everywhere,',ko:'어디를 봐도 고양이와 새끼 고양이,'},
+ {t:'Hundreds of cats,',ko:'수백 마리 고양이,'},
+ {t:'Thousands of cats,',ko:'수천 마리 고양이,'},
+ {t:'Millions and billions and trillions of cats.',ko:'수백만, 수십억, 수조 마리 고양이.'}],
+ q:'The numbers get bigger each line. Why?',
+ o:['To count the cats exactly','To show the number growing huge','To name each cat','To end the story'],a:1},
+
+{n:11,scene:'집 앞 마당 · 고양이 떼와 마주선 부부',
+ note:'절차적 씬: 마당을 메운 고양이 실루엣이 술렁임. 가장 긴 쪽 — 자동 분할 검증 지점.',
+ lines:[
+ {t:'"But we can never feed them all," said the very old woman, "They will eat us out of house and home."',ko:'"하지만 저 고양이들을 다 먹일 순 없어요." 할머니가 말했습니다. "우리 집 살림까지 몽땅 거덜낼 거예요."'},
+ {t:'"I never thought of that," said the very old man, "What shall we do?"',ko:'"그 생각은 미처 못 했군." 할아버지가 말했습니다. "어떻게 하지?"'},
+ {t:'The very old woman thought for a while and then she said, "I know! We will let the cats decide which one we should keep."',ko:'할머니는 잠시 생각하더니 말했습니다. "알았어요! 어느 고양이를 기를지 고양이들이 직접 정하게 해요."'},
+ {t:'"Oh yes," said the very old man, and he called to the cats, "Which one of you is the prettiest?"',ko:'"그거 좋군." 할아버지가 고양이들을 향해 외쳤습니다. "너희 중에 누가 제일 예쁘니?"'},
+ {t:'"I am!" "I am!" "No, I am!" "No, I am the prettiest!" "I am!" "No, I am! I am! I am!" cried hundreds and thousands and millions and billions and trillions of voices, for each cat thought itself the prettiest.',ko:'"나야!" "나야!" "아니, 나야!" "아니, 내가 제일 예뻐!" "나야!" "아니 나야! 나야! 나야!" 수백, 수천, 수백만, 수십억, 수조의 목소리가 외쳤습니다. 고양이마다 자기가 제일 예쁘다고 여겼으니까요.'}],
+ q:'Why did every cat answer the old man?',
+ o:['Each one thought it was the prettiest','They were hungry again','They wanted to go home','The old woman asked them to'],a:0}];
+
+const DICT={lonely:'외로운',clean:'깨끗한',except:'~을 빼고는',flowers:'꽃',
+ kittens:'새끼 고양이',everywhere:'어디에나',hundreds:'수백',thousands:'수천',
+ millions:'수백만',billions:'수십억',trillions:'수조',feed:'먹이다, 먹여 키우다',
+ decide:'결정하다',prettiest:'가장 예쁜',voices:'목소리들',itself:'그 자신',
+ thought:'생각했다 (think의 과거형)',while:'잠시 동안 (for a while)'};
+
+const FLOOR=18,CEIL=30,RHYME_CEIL=46;
+const $=s=>document.querySelector(s);
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+let pi=0,beats=[],bi=0,answered=false,fitted=0,started=false;
+const saved=new Set();
+const markup=(t,si)=>esc(t).replace(/([A-Za-z']+)/g,m=>{const k=m.toLowerCase();
+  return DICT[k]?`<span class="w${saved.has(k)?' saved':''}" data-w="${k}" data-s="${si}">${m}</span>`:m;});
+
+const SIZES=[null,[1194,834],[1024,768]];let si=0;
+function stage(){const st=$('#stage'),s=SIZES[si];
+  if(!s){document.body.classList.remove('sim');st.style.cssText='';return;}
+  document.body.classList.add('sim');
+  const k=Math.min((innerWidth-40)/s[0],(innerHeight-40)/s[1],1);
+  st.style.width=s[0]+'px';st.style.height=s[1]+'px';
+  st.style.transform=`translate(-50%,-50%) scale(${k})`;}
+
+function overflows(){const b=$('#body');return b.scrollHeight>b.clientHeight+2;}
+function paint(lines){const p=PAGES[pi];
+  $('#body').innerHTML=lines.map(l=>
+    `<span class="sent${p.rhyme?' rhyme':''}" data-i="${l._i}">${markup(l.t,l._i)}</span>`).join('');}
+function fitDown(){const b=$('#body'),p=PAGES[pi];
+  if(!b.clientHeight) return true;                 /* 접혀 있으면 계산 생략 */
+  let s=p.rhyme?RHYME_CEIL:CEIL;
+  b.style.lineHeight=p.rhyme?'1.5':'var(--lh)';b.style.fontSize=s+'px';
+  let g=0;while(s>FLOOR&&overflows()&&g++<80){s-=1;b.style.fontSize=s+'px';}
+  fitted=s;return !overflows();}
+function buildBeats(){
+  const src=PAGES[pi].lines.map((l,i)=>({...l,_i:i}));
+  const out=[];let start=0;
+  if(!$('#body').clientHeight){paint(src);return [src];}   /* 접힘 상태: 분할 보류 */
+  while(start<src.length){let end=src.length;
+    while(end>start+1){paint(src.slice(start,end));if(fitDown())break;end--;}
+    if(end===start+1){paint(src.slice(start,end));fitDown();}
+    out.push(src.slice(start,end));start=end;}
+  return out;}
+function showBeat(i){bi=Math.min(i,beats.length-1);paint(beats[bi]);fitDown();
+  $('#beats').innerHTML=beats.map((_,k)=>`<span class="bdot ${k<=bi?'on':''}"></span>`).join('');
+  $('#go').textContent=(bi===beats.length-1)?'다 읽었어요':'계속 읽기 ▸';
+  meter();}
+
+function render(){const p=PAGES[pi];answered=false;
+  $('#app').dataset.q='hidden';
+  $('#bg-ph .scene').textContent=`SCENE ${String(p.n).padStart(2,'0')} · ${p.scene}`;
+  $('#bg-ph .note').textContent=p.note;
+  $('#pnum').textContent=`${p.n} / 14`;
+  $('#pills').innerHTML=PAGES.map((x,i)=>
+    `<span class="pill ${i<pi?'done':i===pi?'now':''}"></span>`).join('');
+  $('#qtext').textContent=p.q;
+  $('#opts').innerHTML=p.o.map((o,i)=>
+    `<div class="opt" data-i="${i}"><span class="k">${'ABCD'[i]}</span><span>${esc(o)}</span></div>`).join('');
+  $('#next').disabled=true;$('#next').classList.remove('on');
+  $('#go').classList.add('wait');
+  requestAnimationFrame(()=>{beats=buildBeats();showBeat(0);if(started)speak();});}
+
+function meter(){const b=$('#body'),folded=$('#app').dataset.read==='off';
+  $('#meter').innerHTML= folded
+    ? `<span class="warn">책 접힘 — 배경 전체화면</span><div class="hint">읽어주기와 문제는 그대로 진행됩니다.</div>`
+    : `본문 <b>${fitted}px</b> · ${beats.length}개 읽기 구간 (${bi+1}번째)<br>`+
+      (fitted>=FLOOR?`<span class="ok">● 바닥 ${FLOOR}px 지킴 · 스크롤 없음</span>`:`<span class="warn">▲ 바닥 미달</span>`)+
+      `<div class="hint">${document.body.dataset.f} ${document.body.dataset.w} · ${document.body.dataset.panel} · 상자 ${b.clientWidth}×${b.clientHeight}<br>`+
+      `한 줄 약 ${Math.round(b.clientWidth/(fitted*0.5))}자</div>`;}
+
+/* ── 접기 / 펴기 ── */
+function setFold(off){
+  $('#app').dataset.read=off?'off':'on';
+  $('#fold').textContent=off?'책 펴기':'책 접기';
+  if(!off) setTimeout(()=>{beats=buildBeats();showBeat(bi);},470);
+  else setTimeout(meter,470);}
+$('#fold').onclick=()=>setFold($('#app').dataset.read==='on');
+
+/* ── 읽어주기 ── */
+let playing=false;
+function stopTTS(){playing=false;try{speechSynthesis.cancel()}catch(e){}
+  $('#play').textContent='▶';document.querySelectorAll('.sent').forEach(s=>s.classList.remove('speaking'));}
+function speak(){
+  if(!window.speechSynthesis){unlockGo();return;}
+  stopTTS();playing=true;$('#play').textContent='■';
+  const lines=beats[bi];let i=0;
+  (function go(){
+    if(!playing||i>=lines.length){if(playing)unlockGo();stopTTS();return;}
+    const sents=[...document.querySelectorAll('.sent')];
+    sents.forEach(s=>s.classList.remove('speaking'));
+    if(sents[i])sents[i].classList.add('speaking');
+    const u=new SpeechSynthesisUtterance(lines[i].t);
+    u.lang='en-GB';u.rate=.78;u.pitch=.98;
+    u.onend=()=>{i++;go();};u.onerror=()=>{i++;go();};
+    speechSynthesis.speak(u);})();}
+function unlockGo(){$('#go').classList.remove('wait');}
+$('#play').onclick=()=>{playing?stopTTS():speak();};
+
+$('#go').onclick=()=>{
+  if($('#go').classList.contains('wait'))return;
+  stopTTS();
+  if(bi<beats.length-1){showBeat(bi+1);$('#go').classList.add('wait');speak();}
+  else{$('#app').dataset.q='ask';setTimeout(()=>{if($('#app').dataset.read==='on'){beats=buildBeats();showBeat(bi);}},450);}};
+
+$('#quiz').addEventListener('click',e=>{
+  if($('#app').dataset.q!=='ask')return;
+  if(e.target.closest('.opt')||e.target.closest('#next'))return;
+  $('#app').dataset.q='open';
+  setTimeout(()=>{if($('#app').dataset.read==='on'){beats=buildBeats();showBeat(bi);}},450);});
+$('#opts').addEventListener('click',e=>{
+  const o=e.target.closest('.opt');if(!o||answered)return;
+  if(+o.dataset.i===PAGES[pi].a){answered=true;o.classList.add('correct');
+    $('#next').disabled=false;$('#next').classList.add('on');}
+  else{o.classList.add('wrong');setTimeout(()=>o.classList.remove('wrong'),400);}});
+$('#next').onclick=e=>{e.stopPropagation();if($('#next').disabled)return;
+  pi=(pi+1)%PAGES.length;syncP();render();};
+
+/* 모달 */
+let mSay='',mKey=null;
+function say(t,lang='en-GB',rate=.8){if(!window.speechSynthesis)return;
+  if(playing)stopTTS();
+  const u=new SpeechSynthesisUtterance(t);u.lang=lang;u.rate=rate;speechSynthesis.speak(u);}
+function openWord(key,shown,sentIdx){
+  mKey=key;mSay=shown;
+  $('#m-kind').textContent='낱말';
+  $('#m-top').innerHTML=`<div class="m-word"><span class="term">${esc(shown)}</span>
+     <button class="m-say" id="m-say" aria-label="발음 듣기">🔊</button></div>
+     <div class="m-mean">${esc(DICT[key])}</div>`;
+  const line=PAGES[pi].lines[sentIdx];
+  $('#m-ctxwrap').style.display='';
+  $('#m-ctx').innerHTML=esc(line.t).replace(new RegExp(`\\b(${shown})\\b`,'i'),'<mark>$1</mark>');
+  $('#m-ko').textContent=line.ko;
+  $('#m-save').style.display='';
+  $('#m-save').classList.toggle('on',saved.has(key));
+  $('#m-save').textContent=saved.has(key)?'단어장에 담김 ✓':'단어장에 담기';
+  openModal();say(shown);}
+function openSentence(idx){
+  mKey=null;const line=PAGES[pi].lines[idx];mSay=line.t;
+  $('#m-kind').textContent='문장';
+  $('#m-top').innerHTML=`<div class="m-word" style="align-items:flex-start">
+     <span class="m-sent" style="flex:1">${esc(line.t)}</span>
+     <button class="m-say" id="m-say" aria-label="문장 듣기">🔊</button></div>
+     <div class="m-mean" style="font-size:20px;font-weight:500">${esc(line.ko)}</div>`;
+  $('#m-ctxwrap').style.display='none';$('#m-save').style.display='none';
+  openModal();say(line.t);}
+function openModal(){$('#scrim').classList.add('on');
+  document.getElementById('m-say').onclick=()=>say(mSay);}
+function closeModal(){$('#scrim').classList.remove('on');}
+$('#m-close').onclick=closeModal;
+$('#scrim').onclick=e=>{if(e.target===$('#scrim'))closeModal();};
+addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+$('#m-save').onclick=()=>{if(!mKey)return;
+  saved.has(mKey)?saved.delete(mKey):saved.add(mKey);
+  $('#m-save').classList.toggle('on',saved.has(mKey));
+  $('#m-save').textContent=saved.has(mKey)?'단어장에 담김 ✓':'단어장에 담기';
+  $('#wcount').textContent=`단어장 ${saved.size}`;
+  document.querySelectorAll(`.w[data-w="${mKey}"]`).forEach(el=>el.classList.toggle('saved',saved.has(mKey)));};
+$('#body').addEventListener('click',e=>{
+  const w=e.target.closest('.w'),s=e.target.closest('.sent');
+  if(w)openWord(w.dataset.w,w.textContent,+w.dataset.s);
+  else if(s)openSentence(+s.dataset.i);});
+
+$('#gate').onclick=()=>{$('#gate').classList.add('off');started=true;
+  setTimeout(()=>$('#gate').remove(),600);speak();};
+
+function pick(sel,attr,fn){$(sel).onclick=e=>{const b=e.target.closest('button');if(!b)return;
+  [...$(sel).children].forEach(x=>x.classList.toggle('sel',x===b));fn(b.dataset[attr]);};}
+const relayout=()=>requestAnimationFrame(()=>{beats=buildBeats();showBeat(bi);});
+pick('#fsw','f',v=>{document.body.dataset.f=v;relayout();});
+pick('#wsw','w',v=>{document.body.dataset.w=v;relayout();});
+pick('#nsw','n',v=>{document.body.dataset.panel=v;relayout();});
+pick('#psw','p',v=>{pi=+v;stopTTS();render();});
+pick('#ssw','s',v=>{si=+v;stage();relayout();});
+function syncP(){[...$('#psw').children].forEach((x,i)=>x.classList.toggle('sel',i===pi));}
+$('#devtoggle').onclick=()=>document.body.classList.remove('hidedev');
+$('#dev').ondblclick=()=>document.body.classList.add('hidedev');
+addEventListener('resize',()=>{stage();relayout();});
+addEventListener('orientationchange',()=>setTimeout(()=>{stage();relayout();},300));
+
+stage();render();
+</script>
+</body>
+</html>

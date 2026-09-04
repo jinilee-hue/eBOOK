@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# 임시 검사 파일 (tools/smoke.sh 등이 만들었다 지운다)
+_*.html
+
+# 음성 시청용 샘플 — 본 낭독에 쓰이지 않는다
+assets/audio/_audition/
+
+# 개인 설정·키
+.env
+*.local
+
+# 영상 편집 작업 파일 (Premiere 프로젝트·자동저장·소스 클립)
+영상편집/
+
+# Project Gutenberg 원본 덤프.
+# 텍스트·삽화는 미국 내 퍼블릭 도메인이지만 PG 상표·라이선스 조항이 붙어 있다.
+# 배포본에 PG 참조를 남기지 않기로 했으므로 저장소에서 뺀다. 로컬에는 그대로 있다.
+files/pg74181-h/
+files/pg74181-plain.txt

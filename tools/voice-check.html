@@ -1,0 +1,113 @@
+<!doctype html><html lang="ko"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>음성 진단</title>
+<style>
+  body{margin:0;padding:28px;font:15px/1.6 'Pretendard',-apple-system,sans-serif;
+       background:#14151a;color:#e8e9ee}
+  h1{font-size:19px;margin:0 0 4px}
+  p.sub{margin:0 0 20px;color:#9a9caa;font-size:13px}
+  button{font:600 14px/1 'Pretendard',sans-serif;padding:13px 20px;border-radius:10px;
+         border:1.5px solid #c9a13f;background:transparent;color:#c9a13f;cursor:pointer}
+  button:disabled{opacity:.4;cursor:default}
+  select{font:13px 'Pretendard',sans-serif;padding:9px;border-radius:8px;
+         background:#1e2029;color:#e8e9ee;border:1px solid #3a3d4a;max-width:100%}
+  .card{background:#1b1d25;border:1px solid #2b2e3a;border-radius:12px;
+        padding:16px 18px;margin:16px 0}
+  .verdict{font-size:17px;font-weight:700;margin-bottom:6px}
+  .ok{color:#4ade80} .no{color:#f87171} .warn{color:#fbbf24}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+  th,td{text-align:left;padding:5px 8px;border-bottom:1px solid #2b2e3a}
+  th{color:#9a9caa;font-weight:600}
+  td.n{text-align:right;font-variant-numeric:tabular-nums}
+  code{background:#24262f;padding:2px 5px;border-radius:4px;font-size:12px}
+</style>
+
+<h1>음성 진단</h1>
+<p class="sub">이 기기의 음성이 단어 위치(onboundary)를 알려주는지 확인합니다.</p>
+
+<div class="card">
+  <select id="v"></select>
+  <p style="margin:12px 0 0"><button id="go">테스트 시작</button></p>
+</div>
+
+<div id="out"></div>
+
+<script>
+var synth = speechSynthesis;
+var TEXT = 'Once upon a time there was a very old man and a very old woman.';
+var sel = document.getElementById('v'), out = document.getElementById('out');
+
+function fill() {
+  var vs = (synth.getVoices() || []).filter(function (v) { return /^en/i.test(v.lang); });
+  if (!vs.length) return;
+  vs.sort(function (a, b) { return a.name.localeCompare(b.name); });
+  sel.innerHTML = vs.map(function (v, i) {
+    return '<option value="' + i + '">' + v.name + ' · ' + v.lang +
+           (v.localService === false ? ' · 네트워크' : ' · 기기') + '</option>';
+  }).join('');
+  window.VS = vs;
+  var pref = vs.findIndex(function (v) { return /premium/i.test(v.name); });
+  if (pref >= 0) sel.selectedIndex = pref;
+}
+fill();
+synth.onvoiceschanged = fill;
+
+document.getElementById('go').onclick = function () {
+  var btn = this; btn.disabled = true;
+  out.innerHTML = '<div class="card">읽는 중…</div>';
+  var v = window.VS[+sel.value];
+  var u = new SpeechSynthesisUtterance(TEXT);
+  u.voice = v; u.lang = v.lang; u.rate = 0.72; u.pitch = 0.96;
+
+  var t0 = 0, marks = [], startAt = Date.now();
+  u.onstart = function () { t0 = Date.now(); };
+  u.onboundary = function (e) {
+    marks.push({ ci: e.charIndex, len: e.charLength || 0,
+                 ms: Date.now() - (t0 || startAt), name: e.name || 'word' });
+  };
+  u.onend = function () {
+    btn.disabled = false;
+    var dur = Date.now() - (t0 || startAt);
+    var lead = t0 ? t0 - startAt : 0;
+    var words = TEXT.split(/\s+/).length;
+    var html = '';
+
+    if (!marks.length) {
+      html += '<div class="card"><div class="verdict no">onboundary 가 오지 않습니다</div>' +
+        '이 음성으로는 단어 위치를 알 수 없어 시간 추정으로만 따라갈 수 있습니다. ' +
+        '목록에서 <code>기기</code> 로 표시된 다른 음성을 골라 다시 눌러 보세요.</div>';
+    } else {
+      var per = marks.length / words;
+      html += '<div class="card"><div class="verdict ' + (per > 0.8 ? 'ok' : 'warn') + '">' +
+        (per > 0.8 ? 'onboundary 가 단어마다 옵니다' : 'onboundary 가 오지만 듬성듬성합니다') +
+        '</div>단어 ' + words + '개에 신호 ' + marks.length + '개' +
+        (per > 0.8 ? ' — 이 음성을 쓰면 하이라이트가 실제 위치와 맞습니다.'
+                   : ' — 신호가 모자라 사이가 벌어집니다.') + '</div>';
+    }
+
+    html += '<div class="card"><table>' +
+      '<tr><th>항목</th><th class="n">값</th></tr>' +
+      '<tr><td>음성</td><td class="n">' + v.name + '</td></tr>' +
+      '<tr><td>종류</td><td class="n">' + (v.localService === false ? '네트워크' : '기기 설치') + '</td></tr>' +
+      '<tr><td>speak() → 소리 시작</td><td class="n">' + lead + ' ms</td></tr>' +
+      '<tr><td>낭독 길이</td><td class="n">' + (dur / 1000).toFixed(2) + ' 초</td></tr>' +
+      '<tr><td>초당 글자</td><td class="n">' + (TEXT.length / (dur / 1000)).toFixed(1) + '</td></tr>' +
+      '<tr><td>신호 수</td><td class="n">' + marks.length + ' / 단어 ' + words + '</td></tr>' +
+      '</table></div>';
+
+    if (marks.length) {
+      html += '<div class="card"><table><tr><th>ms</th><th>글자위치</th><th>단어</th></tr>' +
+        marks.slice(0, 20).map(function (m) {
+          var w = TEXT.slice(m.ci).split(/[\s,.!?]/)[0];
+          return '<tr><td class="n">' + m.ms + '</td><td class="n">' + m.ci +
+                 '</td><td>' + w + '</td></tr>';
+        }).join('') + '</table></div>';
+    }
+    out.innerHTML = html;
+  };
+  u.onerror = function () { btn.disabled = false; out.innerHTML = '<div class="card no">읽기에 실패했습니다.</div>'; };
+  synth.cancel();
+  synth.speak(u);
+};
+</script>
+</html>

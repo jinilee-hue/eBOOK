@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Millions of Cats</title>
+<meta name="description" content="Wanda Gág의 『Millions of Cats』(1928)를 배경 영상 위에서 읽는 영어 학습 리더">
+
+<!-- Andika는 assets/fonts/ 의 자체 호스팅본이 우선. 없으면 구글 폰트로 폴백한다 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Andika:ital,wght@0,400;0,700;1,400&family=Lexend:wght@300..700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700&family=Fraunces:opsz,wght,SOFT,WONK@9..144,600;9..144,700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
+
+<link rel="stylesheet" href="styles/fonts.css?v=1788500587">
+<link rel="stylesheet" href="styles/tokens.css?v=1788500587">
+<link rel="stylesheet" href="styles/reader.css?v=1788500587">
+</head>
+
+<body data-f="andika" data-panel="dark" data-w="400">
+
+<div id="stage">
+  <!-- 배경: js/scenes.js가 canvas(절차적) 또는 video(mp4)를 여기에 깐다 -->
+  <div id="bg"></div>
+  <div id="dim"></div>
+
+  <div id="app" data-q="hidden" data-read="on">
+
+    <header id="topbar">
+      <span class="title">Millions of Cats</span>
+    </header>
+
+    <!-- 본문 패널 (접힘 대상) -->
+    <main id="read">
+      <p id="scene" class="sr-only"></p>
+      <div id="sheet"><div class="body" id="body"></div></div>
+
+      <!-- 단어·문장 카드는 본문 패널 안에서만 뜬다. 배경 영상은 가리지 않는다 -->
+      <div id="scrim">
+        <div id="modal" role="dialog" aria-modal="true" aria-labelledby="m-kind">
+          <button type="button" id="m-close" aria-label="닫기">✕</button>
+          <div class="m-pad">
+            <div class="m-kind" id="m-kind"></div>
+            <div id="m-top"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 컨트롤 바 — 패널 밖에 둔다. 접어도 흐름이 끊기지 않아야 한다 -->
+    <div id="ctl">
+      <nav id="pager" aria-label="쪽 이동">
+        <span class="pglab" aria-hidden="true">PAGE</span>
+        <button type="button" id="prev" aria-label="이전 쪽">‹</button>
+        <span id="pnum" aria-live="polite">—</span>
+        <button type="button" id="pnext" aria-label="다음 쪽">›</button>
+      </nav>
+      <button type="button" id="wbbtn" aria-label="단어장 열기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="6.5" width="13.5" height="14" rx="2.5"/>
+          <path d="M7.5 3.5H18a2.5 2.5 0 0 1 2.5 2.5v10.5"/>
+        </svg>
+        <b id="wbcount">0</b>
+      </button>
+      <button type="button" id="fold" aria-label="책 접기" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 5a2 2 0 0 1 2-2h11v18H7a2 2 0 0 1-2-2V5Z"/><path d="M18 17H7a2 2 0 0 0-2 2"/>
+        </svg>
+      </button>
+      <button type="button" id="hl" aria-label="따라 읽기" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 6.5h16" stroke-opacity=".38"/>
+          <path d="M4 12h11" stroke-width="2.6"/>
+          <path d="M4 17.5h16" stroke-opacity=".38"/>
+        </svg>
+      </button>
+      <button type="button" id="play" aria-label="소리 켜기" aria-pressed="false" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M16.5 10l4.5 4.5"/><path d="M21 10l-4.5 4.5"/>
+        </svg>
+      </button>
+      <div class="go-wrap" id="gowrap">
+        <span class="go-cue" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <defs>
+              <linearGradient id="cueGold" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0"    stop-color="var(--act-lit)"/>
+                <stop offset="0.45" stop-color="var(--act)"/>
+                <stop offset="1"    stop-color="var(--act-sink)"/>
+              </linearGradient>
+            </defs>
+            <!-- 모서리를 2차 베지어로 둥글린 삼각형. stroke-linejoin 만으로는
+                 획 굵기만큼밖에 안 둥글어서 형태 자체를 둥글게 그린다 -->
+            <path d="M 6.6 6.6 L 17.4 6.6 Q 20.4 6.6 18.68 9.06 L 13.72 16.14
+                     Q 12 18.6 10.28 16.14 L 5.32 9.06 Q 3.6 6.6 6.6 6.6 Z"
+                  fill="url(#cueGold)" stroke="var(--act-lit)" stroke-width="1.4"
+                  stroke-linejoin="round" stroke-opacity=".55"/>
+          </svg>
+        </span>
+        <button type="button" id="go">NEXT<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 5.5 15.5 12 9 18.5"/></svg></button>
+      </div>
+    </div>
+
+    <!-- 하단 띠: 문제 -->
+    <section id="quiz" aria-label="이해 확인 문제">
+      <div id="qhead">
+        <div class="q-text" id="qtext"></div>
+        <button type="button" id="requiz" aria-label="다른 문제 보기" title="다른 문제" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4.2V9.5h5.3"/>
+          </svg>
+        </button>
+        <button type="button" id="resbtn" aria-label="문제 결과 보기">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 6h10"/><path d="M4 12h10"/><path d="M4 18h7"/><path d="m15.5 16.5 2 2 4-4"/>
+          </svg>
+        </button>
+      </div>
+      <div id="qrow">
+        <div id="opts"></div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- 마지막 화면 — 영상 위에 THE END 한 줄. 누르면 마지막 쪽으로 돌아간다 -->
+  <div id="theend" role="button" tabindex="0" aria-label="마지막 쪽으로 돌아가기">
+    <span>THE END</span>
+  </div>
+
+  <div id="gate" role="button" tabindex="0" aria-label="눌러서 시작하기">
+    <h1>Millions of Cats</h1>
+    <p>화면을 누르면 시작합니다</p>
+  </div>
+</div>
+
+<!-- 단어장 — 이야기에서 눌러 본 단어이 카드로 쌓인다. 프린트해서 쓸 수 있다 -->
+<div id="wbscrim">
+  <div id="wbpanel" role="dialog" aria-modal="true" aria-labelledby="wbtitle">
+    <div class="wb-head">
+      <div>
+        <h2 id="wbtitle">단어장</h2>
+        <p id="wbsum"></p>
+      </div>
+      <div class="wb-actions">
+        <button type="button" id="wbprint" aria-label="단어장 프린트" title="프린트">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6.5 9.5V3.5h11v6"/>
+            <path d="M6.5 18H5A2 2 0 0 1 3 16V12a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-1.5"/>
+            <rect x="6.5" y="14.5" width="11" height="6" rx="1.2"/>
+          </svg>
+        </button>
+        <button type="button" id="wbclear" aria-label="단어장 비우기" title="비우기">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 6.5h16"/><path d="M9.5 6.5V4.6a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.9"/>
+            <path d="M6.2 6.5 7 19.9a1.6 1.6 0 0 0 1.6 1.5h6.8a1.6 1.6 0 0 0 1.6-1.5l.8-13.4"/>
+            <path d="M10.2 10.5v6.5M13.8 10.5v6.5"/>
+          </svg>
+        </button>
+        <button type="button" id="wbclose" aria-label="닫기">✕</button>
+      </div>
+    </div>
+    <div id="wbgrid"></div>
+    <p id="wbempty">이야기 속 단어를 눌러 보세요. 내가 찾은 단어가 여기에 모입니다.</p>
+  </div>
+</div>
+
+<!-- 문제 결과 — 전체 화면. 15쪽을 한눈에 보고 눌러서 그 쪽으로 간다 -->
+<div id="resscrim">
+  <div id="respanel" role="dialog" aria-modal="true" aria-labelledby="restitle">
+    <button type="button" id="resclose" aria-label="닫기">✕</button>
+    <h2 id="restitle">문제 결과</h2>
+    <div id="resstat">
+      <div class="res-charts">
+        <div class="stat" id="stat-p">
+          <div class="stat-top">
+            <span class="stat-lab">진행률</span>
+            <span class="stat-num"><b id="rs-pn">0</b><i>%</i></span>
+          </div>
+          <div class="stat-bar" role="img" id="rs-pbar"><span class="fill"></span></div>
+          <p class="stat-cap" id="rs-pc"></p>
+        </div>
+        <div class="stat" id="stat-w">
+          <div class="stat-top">
+            <span class="stat-lab">정오답률</span>
+            <span class="stat-num"><b id="rs-wn">0</b><i>%</i></span>
+          </div>
+          <div class="stat-bar stack" role="img" id="rs-wbar">
+            <span class="fill ok"></span><span class="fill no"></span>
+          </div>
+          <p class="stat-cap legend" id="rs-wc"></p>
+        </div>
+      </div>
+    </div>
+    <div id="resgrid"></div>
+    <div class="res-foot">
+      <button type="button" id="restart" aria-label="처음부터 다시 읽기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4.2V9.5h5.3"/>
+        </svg>
+        READ AGAIN
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ES 모듈이 아니라 일반 스크립트다. file:// 로 직접 열 수 있어야 한다 -->
+<script src="js/content.js?v=1788500587"></script>
+<script src="js/dict.js?v=1788500587"></script>
+<script src="js/fit.js?v=1788500587"></script>
+<script src="js/tts.js?v=1788500587"></script>
+<script src="js/scenes.js?v=1788500587"></script>
+<script src="js/app.js?v=1788500587"></script>
+</body>
+</html>
