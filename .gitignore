@@ -19,3 +19,6 @@ assets/audio/_audition/
 # 배포본에 PG 참조를 남기지 않기로 했으므로 저장소에서 뺀다. 로컬에는 그대로 있다.
 files/pg74181-h/
 files/pg74181-plain.txt
+
+# 음량 정규화 원본 백업
+*.orig

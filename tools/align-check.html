@@ -1,0 +1,114 @@
+<!doctype html><html lang="ko"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>정렬 확인</title>
+<style>
+  body{margin:0;padding:26px;font:15px/1.6 'Pretendard',-apple-system,sans-serif;
+       background:#14151a;color:#e8e9ee}
+  h1{font-size:18px;margin:0 0 3px}
+  p.sub{margin:0 0 18px;color:#9a9caa;font-size:13px}
+  .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+  select,button{font:600 13px 'Pretendard',sans-serif;padding:10px 15px;border-radius:9px;
+       background:#1e2029;color:#e8e9ee;border:1px solid #3a3d4a;cursor:pointer}
+  button.go{border-color:#c9a13f;color:#c9a13f;background:transparent}
+  .card{background:#1b1d25;border:1px solid #2b2e3a;border-radius:12px;padding:18px 20px;margin-bottom:14px}
+  #txt{font-family:'Andika SIL','Andika',serif;font-size:22px;line-height:1.7}
+  .wd{opacity:.30;transition:opacity .12s linear}
+  .wd.said{opacity:.60}
+  .wd.now{opacity:1;color:#ffd77a}
+  .meta{font-size:12px;color:#9a9caa;display:flex;gap:18px;flex-wrap:wrap}
+  .meta b{color:#e8e9ee;font-variant-numeric:tabular-nums}
+  .warn{color:#f8b76b}
+</style>
+
+<h1>정렬 확인</h1>
+<p class="sub">소리를 들으면서 하이라이트가 실제 낭독과 맞는지 봅니다.</p>
+
+<div class="bar">
+  <select id="pg"></select>
+  <button class="go" id="play">재생</button>
+  <button id="back">◀ 3초</button>
+  <button id="slow">0.5배속</button>
+</div>
+
+<div class="card" id="txt">쪽을 고르세요.</div>
+<div class="card meta" id="meta"></div>
+
+<script>
+var audio = new Audio(), doc = null, spans = [], raf = 0;
+var pg = document.getElementById('pg'), txt = document.getElementById('txt'),
+    meta = document.getElementById('meta'), play = document.getElementById('play');
+
+/* 어느 쪽에 json 이 있는지 훑는다 */
+(function scan(n, found) {
+  n = n || 1; found = found || [];
+  if (n > 11) {
+    pg.innerHTML = found.length
+      ? found.map(function (i) { return '<option value="' + i + '">' + i + '쪽</option>'; }).join('')
+      : '<option>정렬된 쪽이 없습니다</option>';
+    if (found.length) load(found[0]);
+    return;
+  }
+  var p = String(n).padStart(2, '0');
+  fetch('../assets/audio/p' + p + '.json', { cache: 'no-store' })
+    .then(function (r) { if (r.ok) found.push(n); })
+    .catch(function () {})
+    .then(function () { scan(n + 1, found); });
+})();
+
+function load(n) {
+  var p = String(n).padStart(2, '0');
+  fetch('../assets/audio/p' + p + '.json', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      doc = d;
+      audio.src = '../assets/audio/' + d.file;
+      audio.playbackRate = 1;
+      render();
+    });
+}
+
+/* 원문을 낱말 단위로 감싼다. 낱말 뒤 구두점은 같은 덩어리로 묶는다 */
+function render() {
+  var t = doc.text, ws = doc.words, out = '';
+  if (ws.length && ws[0].c > 0) out += esc(t.slice(0, ws[0].c));
+  for (var i = 0; i < ws.length; i++) {
+    var end = (i + 1 < ws.length) ? ws[i + 1].c : t.length;
+    out += '<span class="wd" data-i="' + i + '">' + esc(t.slice(ws[i].c, end)) + '</span>';
+  }
+  txt.innerHTML = out;
+  spans = txt.querySelectorAll('.wd');
+  var pct = (doc.guessed / ws.length * 100);
+  meta.innerHTML =
+    '<span>낱말 <b>' + ws.length + '</b></span>' +
+    '<span>길이 <b>' + doc.duration.toFixed(1) + '초</b></span>' +
+    '<span' + (pct >= 5 ? ' class="warn"' : '') + '>채워넣음 <b>' + doc.guessed +
+    '</b> (' + pct.toFixed(1) + '%)</span>' +
+    '<span>지금 <b id="tnow">0.00</b>초</span>';
+}
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+function tick() {
+  if (!doc) return;
+  var now = audio.currentTime, ws = doc.words, cur = -1;
+  for (var i = 0; i < ws.length; i++) { if (ws[i].t <= now) cur = i; else break; }
+  for (var j = 0; j < spans.length; j++) {
+    spans[j].className = 'wd' + (j < cur ? ' said' : j === cur ? ' now' : '');
+  }
+  var el = document.getElementById('tnow');
+  if (el) el.textContent = now.toFixed(2);
+  raf = requestAnimationFrame(tick);
+}
+
+play.onclick = function () {
+  if (audio.paused) { audio.play(); play.textContent = '멈춤'; tick(); }
+  else { audio.pause(); play.textContent = '재생'; cancelAnimationFrame(raf); }
+};
+audio.addEventListener('ended', function () { play.textContent = '재생'; cancelAnimationFrame(raf); });
+document.getElementById('back').onclick = function () { audio.currentTime = Math.max(0, audio.currentTime - 3); };
+document.getElementById('slow').onclick = function () {
+  audio.playbackRate = audio.playbackRate === 1 ? 0.5 : 1;
+  this.textContent = audio.playbackRate === 1 ? '0.5배속' : '보통 속도';
+};
+pg.onchange = function () { audio.pause(); play.textContent = '재생'; load(+pg.value); };
+</script>
+</html>
