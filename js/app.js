@@ -7,6 +7,7 @@
   var PAGES = window.MOC.PAGES;
   var DICT  = window.MOC.DICT;
   var END   = window.MOC.END || null;
+  var Voice = window.MOC.Voice;
   var Fit   = window.MOC.Fit;
   var TTS   = window.MOC.TTS;
   var Scenes = window.MOC.Scenes;
@@ -294,9 +295,10 @@
   function hlMode(m) {
     if (hlSaid === m) return;
     hlSaid = m;
-    console.info('[따라 읽기] ' + (m === 'word'
-      ? '단어 단위 — 브라우저가 onboundary 를 줍니다'
-      : '단어 단위(시간 추정) — 이 브라우저는 onboundary 를 주지 않아 속도로 밀어 줍니다'));
+    console.info('[따라 읽기] ' + (
+      m === 'file' ? '음성 파일 + 정렬 데이터 — 실제 재생 위치를 따라갑니다'
+      : m === 'word' ? '내장 음성 · onboundary 를 줍니다'
+      : '내장 음성 · 시간 추정 (onboundary 없음)'));
   }
 
   /* ── 말의 리듬 ──
@@ -389,19 +391,76 @@
     hlCur = -1;
   }
   function hlStopRead() {
+    Voice.stop();
     $('#app').dataset.hl = hlOn ? 'on' : 'off';
     hlClear();
   }
+  /* 정렬 데이터의 글자 위치는 쪽 전체 기준이고, 화면의 낱말은 문장별 기준이다.
+     쪽 기준 위치가 어느 문장에 속하는지 찾는다. */
+  function alignLineOf(A, c) {
+    for (var i = 0; i < A.lines.length; i++) {
+      var L = A.lines[i];
+      if (c >= L.c && c < L.c + L.len) return i;
+    }
+    return -1;
+  }
+
+  /* 미리 만들어 둔 음성으로 따라 읽는다. 실제 재생 위치를 그대로 쓰므로
+     브라우저가 onboundary 를 주든 말든 똑같이 동작한다. */
+  function hlReadVoice(live) {
+    var n = PAGES[pi].n, A = window.MOC.ALIGN && window.MOC.ALIGN[n];
+    if (!A || !Voice.has(n)) return false;
+    var lines = beats[bi] || [];
+    if (!lines.length) return false;
+
+    /* 이 구간이 담고 있는 원문 문장 번호 → 화면에 그려진 자리 */
+    var slot = {};
+    for (var k = 0; k < lines.length; k++) slot[lines[k]._i] = k;
+    var first = A.lines[lines[0]._i], last = A.lines[lines[lines.length - 1]._i];
+    if (!first || !last) return false;
+
+    hlMode('file');
+    return Voice.play(n, {
+      from: first.t,
+      to: last.t1 + 0.15,
+      onWord: function (i, c) {
+        if (!live()) return;
+        var li = alignLineOf(A, c);
+        if (li < 0) return;
+        var si = slot[li];
+        if (si == null) return;
+        hlCur = si;
+        hlPaint(si, c - A.lines[li].c);
+      },
+      onEnd: function (ok) {
+        if (!live()) return;
+        if (ok) { hlStopRead(); return; }
+        /* 파일을 못 읽었다. 내장 음성으로 내려간다 */
+        console.warn('[따라 읽기] 음성 파일 재생 실패 — 내장 음성으로 갑니다');
+        hlReadTTS(live);
+      }
+    });
+  }
+
   function hlRead() {
     if (!hlOn || !started) return;
     var lines = beats[bi] || [];
-    if (!lines.length || !TTS.supported) return;
+    if (!lines.length) return;
     var from = pi, fromBi = bi, mine = ++hlToken;
     var live = function () { return hlOn && pi === from && bi === fromBi && mine === hlToken; };
 
     hlScan();
     hlClear();
     $('#app').dataset.hl = 'reading';
+    if (hlReadVoice(live)) return;
+    hlReadTTS(live);
+  }
+
+  /* 음성 파일이 없을 때의 그물. 브라우저 내장 음성으로 읽고,
+     onboundary 가 오면 실제 위치를, 안 오면 음절·구두점으로 시간을 나눈다. */
+  function hlReadTTS(live) {
+    var lines = beats[bi] || [];
+    if (!lines.length || !TTS.supported) return;
     TTS.speakLines(lines, {
       tag: PAGES[pi].n + '쪽 따라 읽기',
       rate: TTS.RATE_SENT,
@@ -480,7 +539,7 @@
   /* ── 성우 낭독 ──
      쪽 전체가 아니라 content.js의 narrate.lines 가 고른 문장만 읽는다.
      영상 소리는 끄지 않고 낮추기만 한다(duck) — 분위기 소리는 계속 들려야 한다. */
-  var narrateTimer = 0;
+  var narrateTimer = 0, narrateAudio = null;
 
   /* 읽을 문장을 고른다. text 를 주면 원문 대신 그 문장을 읽는다 —
      원문 한 줄이 너무 길어 앞부분만 읽히고 싶을 때 쓴다. */
@@ -493,8 +552,45 @@
 
   function stopNarration() {
     clearTimeout(narrateTimer);
+    if (narrateAudio) {
+      /* src 를 떼면 error 이벤트가 뜬다. 그 폴백이 돌면 이전 쪽 문장을
+         내장 음성이 읽기 시작한다 — 표를 남겨 물러나게 한다. */
+      narrateAudio.dead = true;
+      narrateAudio.pause();
+      narrateAudio.removeAttribute('src');
+      narrateAudio = null;
+    }
     TTS.stop();
     Scenes.duck(false);
+  }
+
+  /* 쪽 음성에서 낭독할 구간을 잘라 재생한다.
+     narrate.text 가 있으면 원문 한 줄의 앞부분만 읽는 설정이므로,
+     그 문구의 마지막 낱말이 끝나는 지점까지만 간다. */
+  function narrateVoice(from, cfg, done) {
+    var n = PAGES[from].n, A = window.MOC.ALIGN && window.MOC.ALIGN[n];
+    if (!A || !Voice.has(n)) return false;
+    var idx = cfg.lines || [0];
+    var L0 = A.lines[idx[0]], Lz = A.lines[idx[idx.length - 1]];
+    if (!L0 || !Lz) return false;
+
+    var to = Lz.t1 + 0.15;
+    if (cfg.text) {
+      var frag = cfg.text.join(' ').replace(/[^A-Za-z]+$/, '');
+      var endC = L0.c + frag.length;
+      var last = null;
+      for (var i = 0; i < A.words.length; i++) {
+        if (A.words[i].c < endC) last = A.words[i].t1; else break;
+      }
+      if (last) to = last + 0.15;
+    }
+    return Voice.play(n, {
+      from: L0.t, to: to,
+      onEnd: function (ok) {
+        if (ok) done('쪽 음성 · ' + A.file);
+        else done('쪽 음성 재생 실패');
+      }
+    });
   }
 
   function startNarration() {
@@ -519,11 +615,49 @@
                      ((Date.now() - t0) / 1000).toFixed(1) + '초');
       };
 
-      if (!TTS.supported) { done('음성 없음'); return; }
-      TTS.speakLines(lines, {
-        tag: (from + 1) + '쪽',
-        rate: cfg.rate, gap: cfg.gap, pitch: cfg.pitch,
-        onEnd: function () { done(TTS.voiceName); }
+      /* 폴백은 한 번만, 그리고 그 쪽에 머물러 있을 때만 돈다.
+         error 와 play() 거부가 둘 다 오는 브라우저가 있다. */
+      var fellBack = false;
+      var viaTTS = function () {
+        if (fellBack || pi !== from) return;
+        fellBack = true;
+        if (!TTS.supported) { done('음성 없음'); return; }
+        TTS.speakLines(lines, {
+          tag: (from + 1) + '쪽',
+          rate: cfg.rate, gap: cfg.gap, pitch: cfg.pitch,
+          onEnd: function () { done('시스템 음성 · ' + TTS.voiceName); }
+        });
+      };
+
+      /* 쪽 음성이 있으면 그 안의 해당 구간만 재생한다.
+         따라 읽기·문장·낱말과 같은 파일이라 목소리가 갈릴 수 없다. */
+      if (narrateVoice(from, cfg, done)) return;
+
+      /* 미리 만들어 둔 성우 음성이 있으면 그것을 쓴다.
+         음량은 tools/normalize_audio.py 로 맞춰 두었으므로 여기서 키우지 않는다 —
+         재생 중에 배율로 올리면 튀는 구간이 잘려 나간다. */
+      if (!cfg.audio) { viaTTS(); return; }
+
+      var a = new Audio('assets/audio/' + cfg.audio);
+      a.preload = 'auto';
+      a.volume = 1;
+      narrateAudio = a;
+      a.addEventListener('ended', function () {
+        narrateAudio = null;
+        fellBack = true;                       /* 다 들었으니 폴백은 없다 */
+        done('음성 파일 · ' + cfg.audio);
+      });
+      a.addEventListener('error', function () {
+        if (a.dead) return;                    /* 멈추느라 뗀 것이지 실패가 아니다 */
+        console.warn('[narrate] 음성 파일을 못 읽어 시스템 음성으로 갑니다:', cfg.audio);
+        narrateAudio = null;
+        viaTTS();
+      });
+      var pr = a.play();
+      if (pr && pr.catch) pr.catch(function () {
+        if (a.dead) return;
+        narrateAudio = null;
+        viaTTS();
       });
     }, cfg.delay || 0);
   }
@@ -711,37 +845,52 @@
 
   /* ── 모달 ── */
   var mSay = '', lastFocus = null;
+  var mPlay = null;          /* 이 카드를 소리내는 함수 */
+  function sayCard() { if (mPlay) mPlay(); }
   function openModal() {
     /* 단어을 누르면 읽기가 끊긴다. 흐려진 글을 그대로 두면 읽을 수 없는 쪽이 된다 */
     hlStopRead();
     lastFocus = document.activeElement;
     Scenes.duck(true);          /* 영상 소리와 발음이 겹치면 둘 다 안 들린다 */
     $('#scrim').classList.add('on');
-    $('#m-say').onclick = function () { TTS.say(mSay); };
+    $('#m-say').onclick = sayCard;
     $('#m-close').focus();
   }
   function closeModal() {
     Scenes.duck(false);
+    Voice.stop();
     TTS.stop();
     $('#scrim').classList.remove('on');
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
   /* 단어 카드는 단어와 뜻만 보여 준다.
      예문은 카드 뒤 본문에 그대로 있으므로 다시 싣지 않는다. */
-  function openWord(key, shown) {
+  /* pc 는 쪽 전체 기준 글자 위치. 있으면 그 낱말이 실제로 발음된 구간을 재생한다 —
+     본문을 읽어 준 그 목소리 그대로다. 없으면 내장 음성으로 내려간다. */
+  function openWord(key, shown, pc) {
     wbAdd(key, shown);
     mSay = shown;
+    var n = PAGES[pi].n;
+    mPlay = function () {
+      if (pc != null && Voice.playWord(n, pc)) return;
+      TTS.say(shown);
+    };
     $('#m-kind').textContent = 'WORD';
     $('#m-top').innerHTML =
       '<div class="m-word"><span class="term">' + esc(shown) + '</span>' +
       '<button type="button" class="m-say" id="m-say" aria-label="발음 듣기">' + ICON.speaker + '</button></div>' +
       '<div class="m-mean">' + esc(DICT[key]) + '</div>';
     openModal();
-    TTS.say(shown);                                /* 열자마자 한 번 읽어준다 */
+    sayCard();                                     /* 열자마자 한 번 읽어준다 */
   }
   function openSentence(idx) {
     var line = PAGES[pi].lines[idx];
     mSay = line.t;
+    var n = PAGES[pi].n;
+    mPlay = function () {
+      if (Voice.playLine(n, idx)) return;
+      TTS.say(line.t, TTS.RATE_SENT);
+    };
     $('#m-kind').textContent = 'SENTENCE';
     $('#m-top').innerHTML =
       '<div class="m-word" style="align-items:flex-start">' +
@@ -749,7 +898,7 @@
       '<button type="button" class="m-say" id="m-say" aria-label="문장 듣기">' + ICON.speaker + '</button></div>' +
       '<div class="m-mean" style="font-size:20px;font-weight:500">' + esc(line.ko) + '</div>';
     openModal();
-    TTS.say(line.t, TTS.RATE_SENT);
+    sayCard();
   }
   $('#m-close').onclick = closeModal;
   $('#scrim').onclick = function (e) { if (e.target === $('#scrim')) closeModal(); };
@@ -775,8 +924,13 @@
   /* 본문 클릭: 단어이 우선, 없으면 문장 */
   function bodyHit(target) {
     var w = target.closest('.w'), s = target.closest('.sent');
-    if (w) openWord(w.dataset.w, w.textContent);
-    else if (s) openSentence(+s.dataset.i);
+    if (w) {
+      /* .wd 의 data-c 는 문장 안에서의 위치다. 정렬 데이터는 쪽 전체 기준이라 옮겨 준다 */
+      var A = window.MOC.ALIGN && window.MOC.ALIGN[PAGES[pi].n];
+      var si = +w.dataset.s, lc = +w.dataset.c, pc = null;
+      if (A && A.lines[si] && !isNaN(lc)) pc = A.lines[si].c + lc;
+      openWord(w.dataset.w, w.textContent, pc);
+    } else if (s) openSentence(+s.dataset.i);
   }
   $('#body').addEventListener('click', function (e) { bodyHit(e.target); });
   $('#body').addEventListener('keydown', function (e) {

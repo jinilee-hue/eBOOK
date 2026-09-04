@@ -47,7 +47,7 @@ window.MOC.PAGES = [
    ko:'"네, 조그맣고 폭신폭신한 귀여운 고양이요." 할머니가 말했습니다.'},
   {t:'"I will get you a cat, my dear," said the very old man.',
    ko:'"내가 한 마리 데려오리다, 여보." 할아버지가 말했습니다.'}],
- narrate:{lines:[0], rate:0.78, pitch:0.96, gap:260, duck:0.08, delay:700},
+ narrate:{lines:[0], rate:0.78, pitch:0.96, gap:260, duck:0.08, delay:700, audio:'01_narration.mp3'},
  alt:[
   {q:'What kind of cat did the old woman want?',
    o:['A big black cat','A sweet little fluffy cat','A cat with stripes','Hundreds of cats'], a:1}],
@@ -76,7 +76,7 @@ window.MOC.PAGES = [
    ko:'수천 마리 고양이,'},
   {t:'Millions and billions and trillions of cats.',
    ko:'수백만, 수십억, 수조 마리 고양이.'}],
- narrate:{lines:[0,1], rate:0.78, pitch:0.96, gap:260, duck:0.08, delay:700},
+ narrate:{lines:[0,1], rate:0.78, pitch:0.96, gap:260, duck:0.08, delay:700, audio:'02_narration.mp3'},
  alt:[
   {q:'What did the old man find at the end of his long walk?',
    o:['A pond full of water','A hill covered with cats','A house made of flowers','A baby tiger'], a:1},
@@ -145,7 +145,7 @@ window.MOC.PAGES = [
   {q:'What did the old man want to show the old woman?',
    o:['The sunny hills','His pretty kittens','A pond','A baby tiger'], a:1}],
  narrate:{lines:[0], text:['So it happened that every time the very old man looked up.'],
-          rate:0.78, pitch:0.96, gap:260, duck:0.08, delay:700},
+          rate:0.78, pitch:0.96, gap:260, duck:0.08, delay:700, audio:'05_narration.mp3'},
  q:'How many cats did the old man choose in the end?',
  o:['Only one','About ten','All of them','None of them'], a:2},
 
