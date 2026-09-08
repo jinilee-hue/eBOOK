@@ -32,7 +32,7 @@ window.MOC.SUMMARY_SKIP = [6, 11];
             9.10초에 소리가 돌아와 9.5초쯤 목소리가 실린다. 요약이 2.27초이므로
             6.75초에 시작하면 9.02초에 끝난다 — 소리가 돌아오기 직전이다.
             여기가 마지막 자리다. 더 미루려면 영상에서 그 사이를 더 늘려야 한다. */
-window.MOC.SUMMARY_AT = { 9: 6.75 };
+window.MOC.SUMMARY_AT = { 9: 6.55 };
 
 window.MOC.SUMMARY = {
    1: 'An old man and an old woman lived alone. They wanted a little cat.',
