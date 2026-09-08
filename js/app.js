@@ -1099,7 +1099,7 @@
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openGate(); }
   });
 
-  /* ── 무대 축소(데스크톱에서 아이패드 비율 확인용) ── */
+  /* ── 무대 축소(데스크톱에서 태블릿 비율 확인용) ── */
   var SIZES = [null, [1194, 834], [1024, 768]], si = 0;
   function stage() {
     var st = $('#stage'), s = SIZES[si];

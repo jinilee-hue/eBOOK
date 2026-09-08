@@ -658,7 +658,7 @@ body.hidedev #devtoggle{display:block}
   position:relative;
   border:1px solid rgba(27,28,33,.12);border-radius:14px;overflow:hidden;background:#fff;
 }
-/* 단어 하나씩 지우기 — 아이패드에는 hover가 없으니 늘 보이되 조용하게 */
+/* 단어 하나씩 지우기 — 터치 화면에는 hover가 없으니 늘 보이되 조용하게 */
 .wb-del{
   position:absolute;top:7px;right:7px;z-index:2;
   width:26px;height:26px;border:none;border-radius:50%;cursor:pointer;
@@ -711,7 +711,7 @@ body.hidedev #devtoggle{display:block}
   @page{margin:14mm}
 }
 
-/* 아이패드보다 훨씬 좁은 화면 — 한 줄을 고집하면 가로로 넘친다. 접히게 둔다 */
+/* 태블릿보다 훨씬 좁은 화면 — 한 줄을 고집하면 가로로 넘친다. 접히게 둔다 */
 @media (max-width:560px){
   #ctl{flex-wrap:wrap;justify-content:center;width:100%;max-width:100%}
 }
