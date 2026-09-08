@@ -22,3 +22,4 @@ files/pg74181-plain.txt
 
 # 음량 정규화 원본 백업
 *.orig
+_takes/
