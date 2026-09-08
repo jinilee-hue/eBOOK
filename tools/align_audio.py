@@ -93,6 +93,15 @@ def align(text, heard):
             out.append({'c': s['c'], 't': hw[hit]['t'], 't1': hw[hit]['t1'], 'guess': False})
             j = hit + 1
 
+    # Whisper 가 구절 끝 낱말의 끝 시각을 시작과 같게 주는 일이 있다.
+    # 그대로 두면 그 낱말을 눌렀을 때 소리가 안 난다. 다음 낱말 앞까지로 메운다.
+    for i, o in enumerate(out):
+        if o['t'] is None or o['t1'] is None or o['t1'] > o['t']:
+            continue
+        nxt = next((out[k]['t'] for k in range(i + 1, len(out))
+                    if out[k]['t'] is not None and out[k]['t'] > o['t']), None)
+        o['t1'] = min(nxt, o['t'] + 0.9) if nxt else o['t'] + 0.35
+
     # 못 맞춘 자리는 앞뒤 사이를 균등하게 나눈다
     n = len(out)
     for i, o in enumerate(out):
@@ -124,8 +133,19 @@ def build_js():
     docs = {}
     for f in sorted(glob.glob(os.path.join(OUT, 'p*.json'))):
         d = json.load(open(f, encoding='utf-8'))
+        ws = d['words']
+        # 길이 0 인 낱말 메우기 (옛 json 에도 적용된다)
+        fixed = 0
+        for i, o in enumerate(ws):
+            if o['t1'] > o['t']:
+                continue
+            nxt = next((ws[k]['t'] for k in range(i + 1, len(ws)) if ws[k]['t'] > o['t']), None)
+            o['t1'] = round(min(nxt, o['t'] + 0.9) if nxt else o['t'] + 0.35, 3)
+            fixed += 1
+        if fixed:
+            print('  %2d쪽  길이 0 인 낱말 %d개 보정' % (d['n'], fixed))
         docs[d['n']] = {'file': d['file'], 'duration': d['duration'],
-                        'lines': d['lines'], 'words': d['words']}
+                        'lines': d['lines'], 'words': ws}
     out = os.path.join(ROOT, 'js', 'align.js')
     with open(out, 'w', encoding='utf-8') as f:
         f.write('/* 자동 생성 — tools/align_audio.py\n'
