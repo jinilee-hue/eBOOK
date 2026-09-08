@@ -13,6 +13,49 @@ window.MOC = window.MOC || {};
 
 window.MOC.Voice = (function () {
   var DIR = 'assets/audio/';
+  var WDIR = 'assets/audio-word/';   /* 낱말마다 따로 만들어 둔 발음 */
+
+  /* ── 낱말 발음 ──
+     쪽 낭독에서 잘라 쓰면 이어 말하는 자리에서 앞뒤가 딸려 나온다.
+     낱말 사이에 무음이 없으니 어디서 잘라도 그렇다 — 경계를 소리로 다시 잡고
+     이웃으로 잘라 내도 조용한 자리에서 끊긴 것은 41%뿐이었다.
+     자를 일을 없애는 편이 낫다. 낱말 하나만 읽은 파일을 따로 둔다.
+     파일 이름은 낱말 그림과 같은 규칙 — 아포스트로피를 뗀다. */
+  var wordEl = null;
+  function wordFile(key) {
+    return WDIR + String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '') + '.mp3';
+  }
+  function stopWordFile() {
+    if (!wordEl) return;
+    wordEl.dead = true;
+    wordEl.pause();
+    wordEl.removeAttribute('src');
+    wordEl = null;
+  }
+  /* 파일이 있으면 그것으로 들려주고 true, 없으면 false 를 돌려준다.
+     부르는 쪽은 false 일 때만 잘라 쓰기로 내려가면 된다. */
+  function sayWord(key, done) {
+    if (!key) return false;
+    stop();
+    stopWordFile();
+    var a = new Audio(wordFile(key));
+    a.preload = 'auto';
+    a.volume = vol;
+    try { a.playbackRate = rate; } catch (e) {}
+    wordEl = a;
+    var fin = function (ok) {
+      if (wordEl !== a) return;
+      wordEl = null;
+      if (done) done(ok);
+    };
+    a.addEventListener('ended', function () { fin(true); });
+    a.addEventListener('error', function () { if (!a.dead) fin(false); });
+    var pr = a.play();
+    if (pr && pr.catch) pr.catch(function () { if (!a.dead) fin(false); });
+    return true;
+  }
+  /* 파일이 실제로 있는지는 미리 알 수 없다(HEAD 를 쏘면 느리다).
+     그래서 재생을 걸어 보고 error 가 나면 부르는 쪽이 폴백한다. */
   var el = null;          /* 재생 중인 <audio> */
   var raf = 0;
   var token = 0;          /* 이전 재생을 무효화하는 표 */
@@ -25,6 +68,7 @@ window.MOC.Voice = (function () {
 
   function stop() {
     token++;
+    stopWordFile();
     cancelAnimationFrame(raf); raf = 0;
     if (!el) return;
     el.dead = true;
@@ -70,9 +114,18 @@ window.MOC.Voice = (function () {
       if (opts.onEnd) opts.onEnd(ok);
     };
 
+    var FADE = 0.045;                   /* 자르는 자리를 부드럽게 */
     var step = function () {
       if (my !== token) return;
       var t = a.currentTime;
+      /* 이어 말하는 자리에는 낱말 사이에 무음이 없다. 그대로 끊으면 앞뒤가
+         '툭' 하고 잘려 이웃 낱말의 조각처럼 들린다. 양끝만 짧게 여닫는다. */
+      if (opts.fade) {
+        var g = 1;
+        if (t - from < FADE) g = Math.max(0, (t - from) / FADE);
+        if (to != null && to - t < FADE) g = Math.min(g, Math.max(0, (to - t) / FADE));
+        try { a.volume = vol * g; } catch (e) {}
+      }
       /* 자리 옮기기가 먹지 않았다면 앞부분이 통째로 나간다. 한 번 더 시도한다. */
       if (from > 0.05 && t < from - 0.5) {
         try { a.currentTime = from; } catch (e) {}
@@ -117,23 +170,51 @@ window.MOC.Voice = (function () {
     if (!L) return false;
     opts = opts || {};
     opts.from = L.t;
-    opts.to = Math.max(L.t1, L.t + 0.6) + 0.12;   /* 끝소리가 잘리지 않게 살짝 여유 */
+    var to = Math.max(L.t1, L.t + 0.6) + 0.12;    /* 끝소리가 잘리지 않게 살짝 여유 */
+    var nx = d.lines[i + 1];                      /* 다음 문장을 물지 않는다 */
+    if (nx) to = Math.min(to, Math.max(L.t1, nx.t - 0.04));
+    opts.to = to;
+    opts.fade = true;
     return play(n, opts);
   }
 
-  /* 낱말 하나. c 는 그 쪽 본문에서의 글자 위치 */
+  /* 낱말 하나. c 는 그 쪽 본문에서의 글자 위치.
+
+     그 낱말만 들려야 한다. 앞뒤로 여유를 주면 이웃 낱말이 함께 나가는데,
+     정렬값 자체가 다음 낱말을 침범하는 경우도 있어(960개 중 38개) 여유만
+     줄여서는 모자란다. 이웃의 시각으로 잘라 낸다. */
+  var WORD_MIN = 0.22;    /* 정렬이 짧게 잡힌 낱말이라도 이만큼은 들려야 한다 */
+  var WORD_MAX = 0.90;    /* 정렬이 이보다 길게 잡혔다면 그것은 틀린 값이다.
+                             낱말 길이 중앙값이 0.34초다 — 0.9초면 넉넉하다 */
+  var EDGE     = 0.02;    /* 이웃과의 사이에 남기는 틈 */
+
   function playWord(n, c, opts) {
     var d = data(n);
     if (!d) return false;
-    var w = null;
-    for (var i = 0; i < d.words.length; i++) {
-      if (d.words[i].c === c) { w = d.words[i]; break; }
+    var i = -1;
+    for (var k = 0; k < d.words.length; k++) {
+      if (d.words[k].c === c) { i = k; break; }
     }
-    if (!w) return false;
+    if (i < 0) return false;
+    var w = d.words[i], prev = d.words[i - 1], next = d.words[i + 1];
     opts = opts || {};
-    opts.from = Math.max(0, w.t - 0.04);
-    /* 정렬이 짧게 잡힌 낱말이라도 들리기는 해야 한다 */
-    opts.to = Math.max(w.t1, w.t + 0.30) + 0.10;
+
+    /* 앞 — 이전 낱말의 끝을 넘어가지 않는다 */
+    var from = w.t - 0.03;
+    if (prev) from = Math.max(from, prev.t1 + EDGE * 0.5);
+    from = Math.max(0, Math.min(from, w.t));
+
+    /* 뒤 — 다음 낱말이 시작하기 전에 끊는다 */
+    var to = Math.max(w.t1, w.t + WORD_MIN) + 0.05;
+    to = Math.min(to, w.t + WORD_MAX);
+    if (next) to = Math.min(to, next.t - EDGE);
+
+    /* 다음 낱말이 바로 붙어 있어 자를 자리가 없으면 정렬값 그대로 쓴다 */
+    if (to <= from + 0.10) to = Math.max(w.t1, from + 0.14);
+
+    opts.from = from;
+    opts.to = to;
+    opts.fade = true;
     return play(n, opts);
   }
 
@@ -164,7 +245,7 @@ window.MOC.Voice = (function () {
   }
 
   return {
-    has: has, play: play, playLine: playLine, playWord: playWord,
+    has: has, play: play, playLine: playLine, playWord: playWord, sayWord: sayWord,
     playLines: playLines, stop: stop, setRate: setRate, setVolume: setVolume,
     get rate() { return rate; },
     get volume() { return vol; },

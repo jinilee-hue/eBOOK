@@ -121,6 +121,10 @@
 
   function sumPlay(n, done) {
     sumStop();
+    /* 본문 낭독이 돌고 있으면 요약은 나가지 않는다. 두 목소리가 겹치면 둘 다
+       안 들린다. flowAudioMode 가 이미 막고 있지만, 접기/펴기 도중이나 낱말
+       카드를 여닫는 사이에 시각을 재는 타이머가 먼저 터질 수 있어 여기서도 막는다. */
+    if (flowOpen() || hlOn || Voice.playing) { done(); return; }
     var S = window.MOC.SUMMARY;
     if (!S || !S[n] || slotSkip(n)) { done(); return; }
     var a = new Audio(window.MOC.av('assets/audio-sum/p' + (n < 10 ? '0' : '') + n + '.mp3'));
@@ -777,8 +781,14 @@
       for (var k = 0; k < hlWords[j].length; k++) hlSet(hlWords[j][k].el, '');
     hlCur = -1;
   }
+  /* 낱말 카드를 열며 멈춘 자리. 닫으면 여기서부터 이어 읽는다.
+     이걸 안 들고 있으면 카드를 닫을 때마다 처음으로 되감겼다 — 읽던 데까지
+     칠해진 하이라이트가 지워지고, 이미 읽은 데를 다시 읽어 겹쳐 들렸다. */
+  var hlPaused = null;
+
   function hlStopRead() {
     flowReadKey = '';
+    hlPaused = null;          /* 멈춰 둔 자리도 버린다 — 이건 '끝내기'다 */
     Voice.stop();
     $('#app').dataset.hl = hlOn ? 'on' : 'off';
     hlClear();
@@ -824,7 +834,7 @@
 
   /* 미리 만들어 둔 음성으로 따라 읽는다. 실제 재생 위치를 그대로 쓰므로
      브라우저가 onboundary 를 주든 말든 똑같이 동작한다. */
-  function hlReadVoice(live) {
+  function hlReadVoice(live, fromT) {
     var n = PAGES[pi].n, A = window.MOC.ALIGN && window.MOC.ALIGN[n];
     if (!A || !Voice.has(n)) return false;
     var lines = beats[bi] || [];
@@ -838,7 +848,8 @@
 
     hlMode('file');
     return Voice.play(n, {
-      from: first.t,
+      /* 이어 읽기 — 카드를 닫고 돌아온 자리. 구간 밖이면 처음부터 */
+      from: (fromT != null && fromT > first.t && fromT < last.t1) ? fromT : first.t,
       to: last.t1 + 0.15,
       onWord: function (i, c) {
         if (!live()) return;
@@ -854,6 +865,41 @@
     });
   }
 
+  /* 낭독을 멈추되 어디까지 읽었는지는 남긴다. 하이라이트도 지우지 않는다 —
+     어디까지 읽었는지 보여야 이어지는 느낌이 난다. */
+  function hlPause() {
+    if (!hlOn || !Voice.playing || !flowReadKey) { hlPaused = null; Voice.stop(); return; }
+    hlPaused = { key: flowReadKey, t: Voice.time };
+    Voice.stop();
+    $('#app').dataset.hl = 'on';      /* '읽는 중' 표시만 내린다 */
+  }
+
+  /* 멈춘 자리에서 이어 읽는다. 이어 읽을 것이 없으면 false */
+  function hlResume() {
+    var p = hlPaused;
+    hlPaused = null;
+    if (!p || !hlOn || !started || atEnd) return false;
+    if (p.key !== pi + ':' + bi) return false;
+    return hlReadAt(p.t);
+  }
+
+  /* fromT 를 주면 그 자리부터, 안 주면 이 구간 처음부터 */
+  function hlReadAt(fromT) {
+    if (!hlOn || !started) return false;
+    var lines = beats[bi] || [];
+    if (!lines.length) return false;
+    flowReadKey = pi + ':' + bi;
+    var from = pi, fromBi = bi, mine = ++hlToken;
+    var live = function () { return hlOn && pi === from && bi === fromBi && mine === hlToken; };
+
+    hlScan();
+    if (fromT == null) hlClear();     /* 이어 읽을 때는 칠해 둔 것을 지우지 않는다 */
+    $('#app').dataset.hl = 'reading';
+    if (hlReadVoice(live, fromT)) return true;
+    hlReadTTS(live);
+    return true;
+  }
+
   function hlRead() {
     if (!hlOn || !started) return;
     var lines = beats[bi] || [];
@@ -862,15 +908,8 @@
        안 그러면 펼치는 순간 낭독이 처음으로 되감긴다. */
     var key = pi + ':' + bi;
     if (Voice.playing && flowReadKey === key) { hlResync(); return; }
-    flowReadKey = key;
-    var from = pi, fromBi = bi, mine = ++hlToken;
-    var live = function () { return hlOn && pi === from && bi === fromBi && mine === hlToken; };
-
-    hlScan();
-    hlClear();
-    $('#app').dataset.hl = 'reading';
-    if (hlReadVoice(live)) return;
-    hlReadTTS(live);
+    if (hlPaused && hlPaused.key === key) { hlResume(); return; }
+    hlReadAt(null);
   }
 
   /* 음성 파일이 없을 때의 그물. 브라우저 내장 음성으로 읽고,
@@ -1364,8 +1403,9 @@
   var mPlay = null;          /* 이 카드를 소리내는 함수 */
   function sayCard() { if (mPlay) mPlay(); }
   function openModal() {
-    /* 단어을 누르면 읽기가 끊긴다. 흐려진 글을 그대로 두면 읽을 수 없는 쪽이 된다 */
-    hlStopRead();
+    /* 낱말을 누르면 낭독을 멈춘다 — 낱말 발음과 겹치면 둘 다 안 들린다.
+       끝내는 것이 아니라 자리를 기억해 두었다가 카드를 닫으면 이어 간다. */
+    hlPause();
     lastFocus = document.activeElement;
     Scenes.duck(true);          /* 영상 소리와 발음이 겹치면 둘 다 안 들린다 */
     $('#scrim').classList.add('on');
@@ -1378,6 +1418,8 @@
     TTS.stop();
     $('#scrim').classList.remove('on');
     if (lastFocus && lastFocus.focus) lastFocus.focus();
+    /* 멈춰 두었던 자리에서 이어 읽는다. 이어 갈 것이 없으면 평소 흐름대로 */
+    if (!hlResume()) flowAudioMode();
   }
   /* 단어 카드는 단어와 뜻만 보여 준다.
      예문은 카드 뒤 본문에 그대로 있으므로 다시 싣지 않는다. */
@@ -1388,8 +1430,14 @@
     mSay = shown;
     var n = PAGES[pi].n;
     mPlay = function () {
-      if (pc != null && Voice.playWord(n, pc)) return;
-      TTS.say(shown);
+      /* 낱말 하나만 읽은 파일이 있으면 그것으로 들려준다 — 잘라 쓸 일이 없으니
+         이웃 낱말이 딸려 나오지 않는다. 파일이 없으면 쪽 낭독에서 잘라 쓰고,
+         그것도 안 되면 브라우저 음성으로 내려간다. */
+      Voice.sayWord(key, function (ok) {
+        if (ok) return;
+        if (pc != null && Voice.playWord(n, pc)) return;
+        TTS.say(shown);
+      });
     };
     $('#m-kind').textContent = 'WORD';
     $('#m-top').innerHTML =

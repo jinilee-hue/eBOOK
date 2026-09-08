@@ -872,8 +872,14 @@
     mSay = shown;
     var n = PAGES[pi].n;
     mPlay = function () {
-      if (pc != null && Voice.playWord(n, pc)) return;
-      TTS.say(shown);
+      /* 낱말 하나만 읽은 파일이 있으면 그것으로 들려준다 — 잘라 쓸 일이 없으니
+         이웃 낱말이 딸려 나오지 않는다. 파일이 없으면 쪽 낭독에서 잘라 쓰고,
+         그것도 안 되면 브라우저 음성으로 내려간다. */
+      Voice.sayWord(key, function (ok) {
+        if (ok) return;
+        if (pc != null && Voice.playWord(n, pc)) return;
+        TTS.say(shown);
+      });
     };
     $('#m-kind').textContent = 'WORD';
     $('#m-top').innerHTML =
