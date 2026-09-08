@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # find_speech �
 
 ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT    = os.path.join(ROOT, 'assets', 'audio-sum')
+KEEP   = os.path.join(OUT, '_takes')   # 뽑은 판을 남겨 두는 곳
 JSC    = '/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc'
 FFMPEG = '/opt/homebrew/bin/ffmpeg'
 
@@ -99,6 +100,8 @@ def main():
     ap.add_argument('--pages')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--speed', type=float, help='이번 실행에만 쓰는 속도')
+    ap.add_argument('--keep', action='store_true',
+                    help='뽑은 것을 모두 assets/audio-sum/_takes/ 에 남긴다')
     ap.add_argument('--takes', type=int, default=1,
                     help='이만큼 뽑아 가장 고른 것을 남긴다 (권장 5)')
     a = ap.parse_args()
@@ -133,6 +136,12 @@ def main():
                       '  ← 지금까지 가장 고름' if best_score is None or score < best_score else ''))
             if best_score is None or score < best_score:
                 best_score, best = score, open(tmp, 'rb').read()
+            # 뽑은 것을 모두 남긴다. 좋은 판을 실험하다 덮어써 잃은 적이 있다.
+            if a.keep:
+                os.makedirs(KEEP, exist_ok=True)
+                with open(os.path.join(KEEP, 'p%02d_take%d_%.3f.mp3'
+                                       % (it['n'], take + 1, score)), 'wb') as g:
+                    g.write(open(tmp, 'rb').read())
             os.remove(tmp)
         with open(path, 'wb') as f:
             f.write(best)
