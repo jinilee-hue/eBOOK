@@ -26,6 +26,11 @@
   /* 장면과 장면 사이의 숨. 짧을수록 이야기가 이어지는 느낌이 산다.
      0 으로 두면 소리가 끝나기 무섭게 넘어가 급해 보이므로 한 박자만 남긴다. */
   var FLOW_GAP = 350;
+  /* 책을 접고 보는 동안의 간격. 영상이 끝나면 마지막 프레임이 그대로 멈춰 서므로
+     (재생 완료 + still 클래스로 배경 확대까지 정지) 이 시간이 곧 '정지 화면'이다.
+     특히 8→9쪽처럼 앞뒤 장면의 구도가 같으면 멈춤이 그대로 드러난다.
+     숨은 0.38초 크로스페이드가 이미 만들어 주므로 여기서는 거의 쉬지 않는다. */
+  var FLOW_GAP_FOLDED = 90;
   /* 글은 처음에 잠깐만 보여 주고 접는다. 이 판은 '보고 듣는' 것이 먼저다.
      아예 안 보여 주면 글이 있다는 것 자체를 모르고, 계속 띄워 두면 읽으려 든다. */
   /* 첫 문장을 다 읽으면 접는다. 고정 시간으로 두면 성우가 아직 읽는 중에 접히거나
@@ -49,6 +54,28 @@
      다음 쪽 영상과 음성을 받아 두면 넘어갈 때 곧바로 나온다.
      HTTP 캐시만 데워 두는 것이라 재생에는 끼어들지 않는다. */
   var flowWarmed = {};
+  /* 미리 받아 둔 <video>. 참조를 들고 있지 않으면 수거되어 헛일이 된다.
+     다만 무한정 쌓으면 안 된다 — 영상 하나가 수 MB이고, iOS 는 동시에 둘 수 있는
+     <video> 개수 자체에 한계가 있다. 앞의 두 쪽만 들고 나머지는 놓아 준다. */
+  var warmEls = {};
+  var warmOrder = [];
+  var WARM_KEEP = 2;
+  function warmVideo(url) {
+    if (warmEls[url]) return;
+    var v = document.createElement('video');
+    v.preload = 'auto';
+    v.muted = true;
+    v.playsInline = true; v.setAttribute('playsinline', '');
+    v.src = url;
+    try { v.load(); } catch (e) {}
+    warmEls[url] = v;
+    warmOrder.push(url);
+    while (warmOrder.length > WARM_KEEP) {
+      var old = warmOrder.shift(), el = warmEls[old];
+      if (el) { try { el.removeAttribute('src'); el.load(); } catch (e) {} }
+      delete warmEls[old];
+    }
+  }
   function flowWarm(n) {
     if (n < 1 || n > PAGES.length || flowWarmed[n]) return;
     flowWarmed[n] = true;
@@ -56,7 +83,12 @@
     var urls = [];
     if (p.video) {
       urls.push(window.MOC.av('assets/posters/' + p.video.replace(/\.mp4$/, '') + '.jpg'));
-      urls.push(window.MOC.av('assets/videos/' + p.video));
+      /* 영상은 fetch 로 받아 두어도 소용이 적다 — <video> 는 범위 요청으로 읽어서
+         통째로 받아 둔 캐시를 그대로 쓰지 못하는 브라우저가 있다. 그래서 진짜
+         <video> 를 하나 만들어 preload 시킨다. 화면에 붙이지는 않는다.
+         이걸 해 두면 다음 쪽에서 loadeddata 가 곧바로 떨어져, 끝난 영상의
+         마지막 프레임이 멈춰 서 있는 시간이 사라진다. */
+      warmVideo(window.MOC.av('assets/videos/' + p.video));
     }
     urls.push(window.MOC.av('assets/audio-sum/p' + (p.n < 10 ? '0' : '') + p.n + '.mp3'));
     var A = window.MOC.ALIGN && window.MOC.ALIGN[p.n];
@@ -142,6 +174,10 @@
      자리를 찾는 건 tools/find_speech.py — 소리 크기가 아니라 말이 있는지로 판단한다. */
   var slotTimer = 0, slotDone = false;
   function slotAt(n) {
+    /* 손으로 정한 자리가 있으면 그것이 먼저다 (content/summary.js 의 SUMMARY_AT).
+       slots.js 는 자동 생성이라 손으로 고쳐 두면 다음 실행에 지워진다. */
+    var M = window.MOC.SUMMARY_AT;
+    if (M && typeof M[n] === 'number') return M[n];
     var S = window.MOC.SLOTS;
     var v = S && S[n];
     return (typeof v === 'number') ? v : null;
@@ -271,11 +307,14 @@
       if (pi !== from || atEnd || busy) return;
       if ($('#scrim').classList.contains('on')) return;   /* 카드를 열어 두었으면 기다린다 */
       flowState('turning');
-      setTimeout(function () {
+      var go = function () {
         if (pi !== from || atEnd) return;
         if (pi < PAGES.length - 1) goTo(pi + 1); else showEnd();
-      }, 200);          /* 글이 사라지는 시간 */
-    }, FLOW_GAP);
+      };
+      /* 글이 사라지는 시간. 접혀 있으면 사라질 것이 없다 —
+         그대로 기다리면 끝난 영상의 마지막 프레임이 그만큼 더 멈춰 서 있다. */
+      if (flowOpen()) setTimeout(go, 200); else go();
+    }, flowOpen() ? FLOW_GAP : FLOW_GAP_FOLDED);
   }
   var Fit   = window.MOC.Fit;
   var TTS   = window.MOC.TTS;
@@ -479,8 +518,12 @@
     flowState('reading');
     /* 새 영상이 붙은 뒤에 속도를 다시 건다 */
     setTimeout(function () { setRate(rateAt); }, 700);
-    /* 지금 쪽이 자리를 잡고 나서 다음 쪽을 받는다 — 지금 것과 대역폭을 다투지 않게 */
-    setTimeout(function () { flowWarm(PAGES[pi].n + 1); }, 2500);
+    /* 지금 쪽이 자리를 잡고 나서 다음 쪽을 받는다 — 지금 것과 대역폭을 다투지 않게.
+       너무 늦게 걸면 짧은 쪽(8쪽 8.0초)에서 다 받기 전에 넘어가, 다음 영상이
+       뜰 때까지 정지 그림이 서 있는다. 자리를 잡자마자 시작한다. */
+    setTimeout(function () { flowWarm(PAGES[pi].n + 1); }, 900);
+    /* 한 쪽 더 미리. 8초짜리 쪽이 이어지면 한 쪽 앞만으로는 모자란다 */
+    setTimeout(function () { flowWarm(PAGES[pi].n + 2); }, 3200);
     flowVideoDone = false;
     sumStop();
     tailReplay(false);

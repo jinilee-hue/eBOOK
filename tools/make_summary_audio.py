@@ -20,6 +20,10 @@ FFMPEG = '/opt/homebrew/bin/ffmpeg'
 MODEL = 'gpt-4o-mini-tts'
 VOICE = 'sage'
 SPEED = 0.94
+# 쪽마다 다르게 두는 속도. 비워 두는 것이 맞다 —
+# 1.0 을 넘기면 음성이 뭉개져 들린다(4쪽에서 1.06 을 시험했다가 되돌렸다).
+# 길어서 느리게 들리는 쪽은 속도가 아니라 문장을 줄인다.
+SPEED_AT = {}
 # 본문 낭독보다 한 걸음 물러난 톤. 이야기를 읽는 것이 아니라 옆에서 짚어 주는 자리다.
 STYLE = ("A gentle narrator explaining what is happening in a picture, to a young child. "
          "Calm and clear, a little slower than normal speech, with warmth. "
@@ -40,13 +44,13 @@ def summaries():
     return json.loads(raw.strip().splitlines()[-1])
 
 
-def speak(text):
+def speak(text, speed):
     key = os.environ.get('OPENAI_API_KEY')
     if not key:
         sys.exit('OPENAI_API_KEY 환경변수가 없습니다.')
     body = json.dumps({'model': MODEL, 'voice': VOICE, 'input': text,
                        'instructions': STYLE, 'response_format': 'mp3',
-                       'speed': SPEED}).encode('utf-8')
+                       'speed': speed}).encode('utf-8')
     req = urllib.request.Request(
         'https://api.openai.com/v1/audio/speech', data=body, method='POST',
         headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
@@ -61,6 +65,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--pages')
     ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--speed', type=float, help='이번 실행에만 쓰는 속도')
     a = ap.parse_args()
 
     os.makedirs(OUT, exist_ok=True)
@@ -72,12 +77,14 @@ def main():
     print('%s · %s · 속도 %.2f\n' % (MODEL, VOICE, SPEED))
     for it in items:
         name = 'p%02d.mp3' % it['n']
-        print('%2d쪽  %-9s %s' % (it['n'], name, it['t']))
+        print('%2d쪽  %-9s 속도 %.2f  %s'
+              % (it['n'], name, a.speed or SPEED_AT.get(it['n'], SPEED), it['t']))
         if a.dry_run:
             continue
         path = os.path.join(OUT, name)
+        speed = a.speed if a.speed else SPEED_AT.get(it['n'], SPEED)
         with open(path, 'wb') as f:
-            f.write(speak(it['t']))
+            f.write(speak(it['t'], speed))
         subprocess.run([FFMPEG, '-y', '-loglevel', 'error', '-i', path,
                         '-af', LOUD, '-c:a', 'libmp3lame', '-b:a', '96k',
                         path + '.n.mp3'], check=True)

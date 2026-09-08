@@ -309,20 +309,23 @@
 }
 
 
-/* ══ 마지막 화면의 다시 보기 ══
+/* ══ 마지막 화면의 READ AGAIN ══
    THE END 아래에 한 박자 늦게 떠오른다 — 글자가 자리를 잡은 뒤에 나와야
    '끝났다'가 먼저 읽히고 '또 볼까'가 그다음이 된다. */
-#theend{ flex-direction:column; gap:34px }
+#theend{ flex-direction:column; gap:40px }
 #again{
-  display:inline-flex; align-items:center; gap:11px;
-  min-height:56px; padding:0 26px; border-radius:var(--r-pill);
-  font-family:'Pretendard',sans-serif; font-size:16px; font-weight:700;
+  display:inline-flex; align-items:center; gap:15px;
+  min-height:76px; padding:0 38px; border-radius:var(--r-pill);
+  /* THE END 는 Fraunces(장식 세리프)다. 버튼까지 같은 서체로 두면 둘이 한 덩어리로
+     붙어 '누르는 것'으로 안 읽힌다. 본문에 쓰는 Andika 로 떼어 놓는다 —
+     아이가 책에서 내내 보던 글자체라 낯설지 않다. */
+  font-family:'Andika SIL','Andika',sans-serif; font-size:21px; font-weight:700;
   letter-spacing:.06em; cursor:pointer;
   background:transparent; color:var(--act);
-  border:1.5px solid var(--act);
+  border:2px solid var(--act);
   opacity:0;
 }
-#again svg{ width:22px; height:22px }
+#again svg{ width:30px; height:30px }
 #again:hover{ background:rgba(var(--act-rgb), .12) }
 #again:active{ transform:translateY(1px) }
 #stage[data-end="on"] #again{ animation:againIn .7s var(--ease) 1.15s both }
