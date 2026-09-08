@@ -38,7 +38,7 @@ window.MOC.SUMMARY = {
    1: 'An old man and an old woman lived alone. They wanted a little cat.',
    2: 'The old man walked over the hills. He found a hill covered with cats.',
    3: 'He picked one cat. Then another.',
-   4: 'Every cat looked too pretty to leave behind.',
+   4: 'Every cat was pretty. He could not leave one behind.',
    5: 'So he chose them all. Millions of cats followed him home.',
    6: 'The pond and the grass were all gone.',
    7: 'The old woman was very surprised.',
