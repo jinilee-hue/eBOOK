@@ -8,6 +8,275 @@
   var DICT  = window.MOC.DICT;
   var END   = window.MOC.END || null;
   var Voice = window.MOC.Voice;
+
+  /* ── 이어서 보기 판 ──
+     문제가 없고, 낭독이 끝나면 쪽이 스스로 넘어간다.
+     영상 소리가 이야기를 나르고, 영상이 끝나면 요약 낭독이 장면을 짚어 준다.
+     책을 펼치면 본문 전체 낭독으로 바뀐다. */
+  /* 원본 영상을 그대로 쓴다. 늘리지 않았으므로 소리가 살아 있고,
+     그 소리가 이야기를 나른다. scenes.js 가 'assets/videos/' 를 앞에 붙인다. */
+  function flowVideo(v) { return v; }
+
+  /* 그 쪽 영상의 첫 프레임. 영상이 붙기 전까지 이 그림이 자리를 지킨다 */
+  function flowPoster(v) {
+    if (!v) { $('#bg').style.backgroundImage = ''; return; }
+    $('#bg').style.backgroundImage =
+      "url('" + window.MOC.av('assets/posters/' + v.replace(/\.mp4$/, '') + '.jpg') + "')";
+  }
+  /* 장면과 장면 사이의 숨. 짧을수록 이야기가 이어지는 느낌이 산다.
+     0 으로 두면 소리가 끝나기 무섭게 넘어가 급해 보이므로 한 박자만 남긴다. */
+  var FLOW_GAP = 350;
+  /* 글은 처음에 잠깐만 보여 주고 접는다. 이 판은 '보고 듣는' 것이 먼저다.
+     아예 안 보여 주면 글이 있다는 것 자체를 모르고, 계속 띄워 두면 읽으려 든다. */
+  /* 첫 문장을 다 읽으면 접는다. 고정 시간으로 두면 성우가 아직 읽는 중에 접히거나
+     다 읽고 한참 뒤에 접힌다 — 정렬 데이터가 끝나는 시각을 알고 있으니 그걸 쓴다. */
+  var FLOW_PEEK = 2600;      /* 글이 있다는 것만 보여 주고 접는 시간 */
+  /* 처음 잠깐 글이 보이는 동안은 '펼친 것'이 아니다. 보여만 주는 것이지
+     읽어 달라는 뜻이 아니므로, 이때는 영상 소리로 간다. */
+  var flowPeeking = false;
+  /* 책을 편 상태로 두려는가. DOM(data-read)은 접힘 애니메이션이 끝나야 바뀌므로
+     그걸 보고 판단하면 전환 도중에 엉뚱한 모드가 잡힌다. 의도를 따로 들고 있는다. */
+  var flowWantOpen = true;
+  var flowFoldTouched = false;   /* 사람이 책 버튼을 건드렸나 */
+  var flowReadKey = '';          /* 지금 읽고 있는 쪽·구간 */
+  var flowT0 = 0;                /* 이 쪽이 열린 시각 */
+  var flowTimer = 0;
+  function flowState(v) { $('#stage').dataset.flow = v; }
+
+  /* ── 다음 쪽을 미리 받아 둔다 ──
+     scenes.js 는 절차적 씬을 먼저 띄우고 영상이 다 받아지면 바꿔 끼운다.
+     그래서 받는 동안 그림이 보인다. 한 쪽에 30~43초 머무르니 그 사이에
+     다음 쪽 영상과 음성을 받아 두면 넘어갈 때 곧바로 나온다.
+     HTTP 캐시만 데워 두는 것이라 재생에는 끼어들지 않는다. */
+  var flowWarmed = {};
+  function flowWarm(n) {
+    if (n < 1 || n > PAGES.length || flowWarmed[n]) return;
+    flowWarmed[n] = true;
+    var p = PAGES[n - 1];
+    var urls = [];
+    if (p.video) {
+      urls.push(window.MOC.av('assets/posters/' + p.video.replace(/\.mp4$/, '') + '.jpg'));
+      urls.push(window.MOC.av('assets/videos/' + p.video));
+    }
+    urls.push(window.MOC.av('assets/audio-sum/p' + (p.n < 10 ? '0' : '') + p.n + '.mp3'));
+    var A = window.MOC.ALIGN && window.MOC.ALIGN[p.n];
+    if (A) urls.push('assets/audio/' + A.file);
+    urls.forEach(function (u) {
+      fetch(u, { cache: 'force-cache' }).catch(function () {});
+    });
+  }
+  function flowProgress() {
+    var el = $('#flowbar');
+    if (el) el.style.width = ((pi + 1) / PAGES.length * 100) + '%';
+  }
+  /* ── 요약 낭독 ──
+     영상 소리가 이야기를 나르고, 영상이 끝난 자리에서 이 음성이 장면을 짚어 준다.
+     영상 중간에 끼워 넣으려면 쪽마다 대사 구간을 손으로 표시해야 한다 —
+     끝난 뒤에 두면 겹칠 일이 없고 쪽마다 규칙이 같다. */
+  var sumAudio = null;
+  var sumPlaying = false;
+  function sumStop() {
+    sumPlaying = false;
+    if (!sumAudio) return;
+    sumAudio.dead = true;
+    sumAudio.pause();
+    sumAudio.removeAttribute('src');
+    sumAudio = null;
+  }
+  /* 지금 읽는 속도. setRate 가 여기에 적어 두면 요약 낭독도 같은 속도로 나간다.
+     RATES·rateAt 은 아래 배선 함수 안에 갇혀 있어 여기서 못 본다. */
+  var curRate = 1;
+
+  function sumPlay(n, done) {
+    sumStop();
+    var S = window.MOC.SUMMARY;
+    if (!S || !S[n] || slotSkip(n)) { done(); return; }
+    var a = new Audio(window.MOC.av('assets/audio-sum/p' + (n < 10 ? '0' : '') + n + '.mp3'));
+    a.preload = 'auto';
+    try { a.playbackRate = curRate; } catch (e) {}
+    sumAudio = a;
+    sumPlaying = true;
+    var end = function () {
+      if (a.dead) return;
+      sumAudio = null; sumPlaying = false;
+      done();
+    };
+    a.addEventListener('ended', end);
+    a.addEventListener('error', end);      /* 파일이 없어도 흐름은 이어진다 */
+    var pr = a.play();
+    if (pr && pr.catch) pr.catch(end);
+  }
+
+  /* ── 소리 모드 ──
+     책이 접혀 있으면(기본) 영상 소리가 이야기를 나르고, 영상이 끝나면
+     요약 낭독이 장면을 짚어 준 뒤 다음 쪽으로 간다.
+     책을 펼치면 본문 전체를 성우가 읽고 낱말 하이라이트가 따라간다.
+     이때 영상 소리는 낮춘다 — 두 목소리가 겹치면 둘 다 안 들린다. */
+  function flowOpen() { return flowWantOpen && !flowPeeking; }
+
+  function flowAudioMode() {
+    if (!started || atEnd) return;
+    clearTimeout(flowTimer);
+    if (flowOpen()) {
+      /* 본문 낭독으로 넘어간다 — 요약은 여기서 멈춘다 */
+      sumStop();
+      clearInterval(slotTimer);
+      hlOn = true;
+      Scenes.duck(true, 0.08);
+      hlRead();                       /* 본문 전체 낭독 + 하이라이트 */
+      return;
+    }
+    hlOn = false;
+    hlStopRead();
+    /* ※ 요약이 나가는 중이면 건드리지 않는다.
+       처음 2.6초 뒤 글이 자동으로 접힐 때도 여기를 지나는데,
+       그때 멈추면 1쪽 요약이 시작하자마자 잘린다. */
+    if (sumPlaying) return;
+    Scenes.duck(false);               /* 영상 소리를 되살린다 */
+    if (flowVideoDone) flowSummaryThenNext();
+  }
+
+  /* 영상 안에 요약을 넣을 자리가 있으면 거기서 튼다.
+     말이 없는 쪽은 장면을 보면서 설명을 듣게 되고, 대사가 빽빽한 쪽은
+     자리가 없으니 영상이 끝난 뒤로 미룬다 (SLOTS 가 null).
+     자리를 찾는 건 tools/find_speech.py — 소리 크기가 아니라 말이 있는지로 판단한다. */
+  var slotTimer = 0, slotDone = false;
+  function slotAt(n) {
+    var S = window.MOC.SLOTS;
+    var v = S && S[n];
+    return (typeof v === 'number') ? v : null;
+  }
+  /* false 는 '이 쪽은 요약을 내보내지 않는다' 는 뜻이다.
+     대사가 영상의 70% 를 넘으면 find_speech.py 가 그렇게 표시한다 —
+     영상이 이미 다 말하고 있어 요약이 군더더기가 된다. */
+  function slotSkip(n) {
+    var S = window.MOC.SLOTS;
+    if (S && S[n] === false) return true;
+    /* 손으로 빼 둔 쪽 (content/summary.js 의 SUMMARY_SKIP) */
+    var K = window.MOC.SUMMARY_SKIP;
+    return !!(K && K.indexOf(n) >= 0);
+  }
+  function slotWatch() {
+    clearInterval(slotTimer);
+    slotDone = false;
+    if (slotSkip(PAGES[pi].n)) return;
+    var at = slotAt(PAGES[pi].n);
+    if (at === null || flowOpen()) return;
+    var from = pi, t0 = Date.now();
+    slotTimer = setInterval(function () {
+      if (pi !== from || slotDone || flowOpen()) { clearInterval(slotTimer); return; }
+      /* 영상이 있으면 그 재생 위치를, 없으면(못 읽었을 때) 시계를 쓴다.
+         영상 요소만 보고 있으면 영상이 안 뜨는 기기에서 요약이 영영 안 나온다. */
+      var v = document.querySelector('#bg video');
+      var t = v ? v.currentTime : (Date.now() - t0) / 1000;
+      if (t < at) return;
+      slotDone = true;
+      clearInterval(slotTimer);
+      /* 영상은 끄지 않고 낮춘다 — 배경음이 이어져야 장면이 안 끊긴다 */
+      Scenes.duck(true, 0.22);
+      sumPlay(PAGES[from].n, function () {
+        if (pi !== from) return;
+        Scenes.duck(false);
+        /* 요약이 영상보다 늦게 끝났으면 여기서 넘긴다 —
+           안 그러면 말하는 도중에 쪽이 바뀐다 */
+        if (flowVideoDone && !flowOpen()) flowNext();
+      });
+    }, 120);
+  }
+
+  /* 영상이 끝났다. 요약을 읽어 주고 넘어간다 */
+  var flowVideoDone = false;
+  /* 영상이 끝난 뒤 요약이 나갈 때, 멈춘 화면을 그대로 두면 7초가 죽은 시간이 된다.
+     마지막 구간을 소리 없이 다시 흘려 장면이 계속 움직이게 한다 —
+     소리를 껐으니 대사와 겹칠 일은 없다. */
+  var tailEl = null;
+  function tailReplay(on) {
+    if (!on) {
+      /* 건드렸던 그 요소만 되돌린다. 다시 찾으면 전환 중에 옛 영상을 집어
+         소리를 켜 버려 다음 쪽 대사와 겹친다. */
+      if (tailEl) { tailEl.loop = false; tailEl = null; }
+      return;
+    }
+    var v = document.querySelector('#bg video');
+    if (!v) return;
+    tailEl = v;
+    v.classList.remove('still');
+    v.muted = true;                 /* 소리는 끈 채로 그림만 다시 흐른다 */
+    v.loop = true;
+    try { v.currentTime = Math.max(0, (v.duration || 0) - 6); } catch (e) {}
+    var pr = v.play();
+    if (pr && pr.catch) pr.catch(function () {});
+  }
+
+  /* 쪽을 넘길 때 옛 영상을 세운다.
+     scenes.js 는 옛 레이어를 860ms 동안 DOM 에 남겨 두는데 소리를 끄지 않아,
+     그 사이 새 쪽 영상이 시작하면 대사 둘이 겹쳐 들린다.
+
+     음소거만으로는 안 된다 — scenes.js 의 applyAudio() 가 화면에 있는 모든
+     영상에 음소거 상태를 다시 적용해서, duck(false) 한 번이면 되살아난다.
+     그래서 아예 정지시킨다. 사라지는 중(0.38초)이라 멈춘 그림이어도 티가 안 난다. */
+  function flowHushOld() {
+    var vs = document.querySelectorAll('#bg video');
+    for (var i = 0; i < vs.length; i++) {
+      vs[i].loop = false;
+      vs[i].muted = true;
+      vs[i].volume = 0;
+      try { vs[i].pause(); } catch (e) {}
+    }
+    tailEl = null;
+  }
+
+  function flowSummaryThenNext() {
+    if (flowOpen() || atEnd || !started) return;
+    var from = pi;
+    /* 영상 도중에 이미 들려줬으면 다시 읽지 않는다.
+       아직 말하는 중이면 그쪽 콜백이 넘길 때까지 기다린다 */
+    if (slotDone) { if (!sumPlaying) flowNext(); return; }
+
+    /* 요약을 내보내지 않는 쪽이면 곧장 넘긴다.
+       ※ 여기서 걸러야 한다. 아래 tailReplay 를 먼저 걸면 영상이 6초 뒤로
+          되감겨 다시 흐르다가 넘어간다 — 장면이 중복돼 보이는 원인이었다. */
+    var n = PAGES[pi].n;
+    var S = window.MOC.SUMMARY;
+    if (slotSkip(n) || !S || !S[n]) { flowNext(); return; }
+
+    tailReplay(true);
+    sumPlay(n, function () {
+      tailReplay(false);
+      if (pi !== from || flowOpen()) return;
+      flowNext();
+    });
+  }
+
+  /* 낭독이 끝나면 다음 쪽으로. 마지막 쪽이면 THE END 로 간다. */
+  function flowNext() {
+    clearTimeout(flowTimer);
+    var from = pi;
+    /* 본문 낭독이 진행을 맡을 때만 길이를 검사한다.
+       영상 모드는 쪽이 영상 길이(7~20초)만큼만 머무르므로,
+       낭독 길이(30~43초)를 기준으로 재면 매번 '너무 빨리 끝났다'로 막힌다.
+
+       소리를 못 내는 기기에서는 '읽기'가 즉시 끝난 것으로 들어온다.
+       그대로 두면 쪽이 우르르 넘어가므로 그때는 멈추고 사람에게 맡긴다. */
+    var A = window.MOC.ALIGN && window.MOC.ALIGN[PAGES[pi].n];
+    var want = (flowOpen() && A) ? A.duration * 1000 : 0;
+    var spent = Date.now() - flowT0;
+    if (want && spent < want * 0.5) {
+      console.warn('[flow] 낭독이 ' + (spent / 1000).toFixed(1) + '초 만에 끝났습니다' +
+                   ' (예상 ' + (want / 1000).toFixed(1) + '초). 자동 넘김을 멈춥니다 — 페이저 › 로 넘겨 주세요.');
+      flowState('idle');
+      return;
+    }
+    flowTimer = setTimeout(function () {
+      if (pi !== from || atEnd || busy) return;
+      if ($('#scrim').classList.contains('on')) return;   /* 카드를 열어 두었으면 기다린다 */
+      flowState('turning');
+      setTimeout(function () {
+        if (pi !== from || atEnd) return;
+        if (pi < PAGES.length - 1) goTo(pi + 1); else showEnd();
+      }, 200);          /* 글이 사라지는 시간 */
+    }, FLOW_GAP);
+  }
   var Fit   = window.MOC.Fit;
   var TTS   = window.MOC.TTS;
   var Scenes = window.MOC.Scenes;
@@ -182,7 +451,7 @@
   function render() {
     var p = PAGES[pi];
     stopNarration();
-    answered = !!solved[pi];
+    answered = true;          /* 문제가 없으므로 쪽 이동이 잠기지 않는다 */
     /* 문제 띠를 "즉시" 접는다.
        트랜지션(0.42초)에 맡기면 새 쪽의 첫 조판이 아직 펼쳐진 띠 높이로 계산되어,
        실제로는 여유가 있는데도 쪽이 둘로 쪼개진다. */
@@ -198,10 +467,24 @@
     syncRequiz();
     unlockGo();
 
-    Scenes.show(p.bg, p.video, p.flip);
+    flowHushOld();
+    flowPoster(p.video);
+    Scenes.show(p.bg, flowVideo(p.video), p.flip);
 
     syncBarWidth();
     stopNudge();
+    clearTimeout(flowTimer);
+    flowT0 = Date.now();
+    flowProgress();
+    flowState('reading');
+    /* 새 영상이 붙은 뒤에 속도를 다시 건다 */
+    setTimeout(function () { setRate(rateAt); }, 700);
+    /* 지금 쪽이 자리를 잡고 나서 다음 쪽을 받는다 — 지금 것과 대역폭을 다투지 않게 */
+    setTimeout(function () { flowWarm(PAGES[pi].n + 1); }, 2500);
+    flowVideoDone = false;
+    sumStop();
+    tailReplay(false);
+    requestAnimationFrame(function () { flowAudioMode(); slotWatch(); });
     /* 영상이 있는 쪽은 재생이 끝나는 시점을 기다린다. 없으면 시간으로 간다.
        ※ 영상이 있어도 안전망을 하나 둔다 — 파일이 크거나 재생이 막히면
           'ended' 가 영영 안 와서 신호가 아예 안 뜬다. */
@@ -241,15 +524,76 @@
 
   /* ── 접기 / 펴기 ──
      컨트롤 바가 패널 밖에 있으므로 접어도 읽어주기·문제 흐름은 끊기지 않는다 */
+  /* 패널 중심에서 책 버튼 중심까지의 거리. CSS 는 버튼 자리를 모르므로 여기서 잰다 */
+  var SUCK_IN = 220, SUCK_OUT = 280;
+  function flowSuckVars() {
+    var sh = $('#sheet'), b = $('#fold');
+    if (!sh || !b) return false;
+    var a = sh.getBoundingClientRect(), r = b.getBoundingClientRect();
+    if (!a.width || !r.width) return false;
+    /* 깔때기가 모이는 지점 — 버튼 중심이 패널 폭의 몇 %에 있나 */
+    var cx = (r.left + r.width / 2) - a.left;
+    sh.style.setProperty('--oxp', Math.max(2, Math.min(98, cx / a.width * 100)).toFixed(1) + '%');
+    /* 패널 아래끝에서 버튼까지의 거리 */
+    sh.style.setProperty('--gy', Math.round((r.top + r.height / 2) - a.bottom) + 'px');
+    return true;
+  }
+
+  /* 맥의 최소화처럼 책 버튼으로 빨려 들어간다.
+     거리를 잴 수 없거나 움직임을 줄이는 설정이면 예전 방식으로 접는다. */
   function setFold(off) {
-    $('#app').dataset.read = off ? 'off' : 'on';
+    var st = $('#stage');
     $('#fold').innerHTML = off ? ICON.bookOpen : ICON.book;
     $('#fold').setAttribute('aria-label', off ? '책 펴기' : '책 접기');
     $('#fold').setAttribute('aria-pressed', off ? 'true' : 'false');
-    /* 전환이 끝난 뒤에 다시 계산한다 — 접힘 중에는 상자 높이가 0이다 */
-    setTimeout(off ? meter : function () { rebuild(); showBeat(bi); }, 470);
+
+    var calm = matchMedia && matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+    if (off) {
+      if (calm || !flowSuckVars()) {
+        $('#app').dataset.read = 'off';
+        setTimeout(meter, 470);
+        return;
+      }
+      st.dataset.suck = 'in';
+      setTimeout(function () {
+        /* 'done' 으로 넘긴다. 여기서 속성을 떼면 패널이 원래 크기로 되돌아와
+           잔상처럼 번쩍인다. 펼칠 때까지 숨김을 유지한다. */
+        st.dataset.suck = 'done';
+        $('#app').dataset.read = 'off';
+        meter();
+      }, SUCK_IN);
+      return;
+    }
+
+    /* 펼 때는 자리를 잡은 뒤에 재야 한다 — 접혀 있는 동안 패널 폭이 0이다.
+       'done' 은 그대로 둔 채 잰다. visibility:hidden 은 자리를 지우지 않으므로
+       숨긴 상태에서도 크기를 알 수 있다.
+       먼저 떼면 아무 스타일 없는 패널이 한 프레임 원래 크기로 드러나 잔상이 된다. */
+    $('#app').dataset.read = 'on';
+    void $('#read').offsetHeight;              /* 자리 확정 */
+    var ok = flowSuckVars();
+    if (calm || !ok) {
+      st.removeAttribute('data-suck');
+      setTimeout(function () { rebuild(); showBeat(bi); }, 470);
+      return;
+    }
+    /* 'done' → 'out' 한 번에 바꾼다. 사이에 빈 상태를 두지 않는다 */
+    st.dataset.suck = 'out';
+    setTimeout(function () {
+      st.removeAttribute('data-suck');
+      rebuild();
+      showBeat(bi);
+    }, SUCK_OUT);
   }
-  $('#fold').onclick = function () { setFold($('#app').dataset.read === 'on'); };
+  $('#fold').onclick = function () {
+    flowFoldTouched = true;      /* 이제부터는 사람이 정한다 */
+    flowPeeking = false;         /* 사람이 손을 댔으면 더는 '보여 주는 중'이 아니다 */
+    flowWantOpen = !flowWantOpen;
+    setFold(!flowWantOpen);
+    /* 펼치면 본문 낭독으로, 접으면 영상 소리로 */
+    flowAudioMode();
+  };
 
   /* ── 따라 읽기 ──
      쪽의 문장을 차례로 읽으면서 지금 줄만 또렷하게 남긴다.
@@ -391,6 +735,7 @@
     hlCur = -1;
   }
   function hlStopRead() {
+    flowReadKey = '';
     Voice.stop();
     $('#app').dataset.hl = hlOn ? 'on' : 'off';
     hlClear();
@@ -403,6 +748,35 @@
       if (c >= L.c && c < L.c + L.len) return i;
     }
     return -1;
+  }
+
+  /* 쪽 전체 기준 글자 위치를 받아 화면의 해당 낱말을 칠한다.
+     지금 그려져 있는 낱말(hlWords)을 기준으로 하므로, 다시 그린 뒤에는
+     반드시 hlScan() 을 먼저 불러야 한다. */
+  function hlPaintPageC(c) {
+    var A = window.MOC.ALIGN && window.MOC.ALIGN[PAGES[pi].n];
+    if (!A) return;
+    var li = alignLineOf(A, c);
+    if (li < 0) return;
+    var lines = beats[bi] || [];
+    for (var k = 0; k < lines.length; k++) {
+      if (lines[k]._i === li) { hlCur = k; hlPaint(k, c - A.lines[li].c); return; }
+    }
+  }
+
+  /* 책을 펼치면 본문을 다시 그린다 — 그 순간 하이라이트가 붙어 있던 낱말들이
+     화면에서 사라진다. 새로 그려진 낱말을 다시 잡고, 지금 재생 위치에 맞춰 칠한다.
+     이걸 빼먹으면 펼친 뒤로 하이라이트가 멈춘 것처럼 보인다. */
+  function hlResync() {
+    var A = window.MOC.ALIGN && window.MOC.ALIGN[PAGES[pi].n];
+    hlScan();
+    $('#app').dataset.hl = 'reading';
+    if (!A) return;
+    var t = Voice.time, c = null;
+    for (var i = 0; i < A.words.length; i++) {
+      if (A.words[i].t <= t) c = A.words[i].c; else break;
+    }
+    if (c != null) hlPaintPageC(c);
   }
 
   /* 미리 만들어 둔 음성으로 따라 읽는다. 실제 재생 위치를 그대로 쓰므로
@@ -425,16 +799,11 @@
       to: last.t1 + 0.15,
       onWord: function (i, c) {
         if (!live()) return;
-        var li = alignLineOf(A, c);
-        if (li < 0) return;
-        var si = slot[li];
-        if (si == null) return;
-        hlCur = si;
-        hlPaint(si, c - A.lines[li].c);
+        hlPaintPageC(c);
       },
       onEnd: function (ok) {
         if (!live()) return;
-        if (ok) { hlStopRead(); return; }
+        if (ok) { hlStopRead(); flowNext(); return; }
         /* 파일을 못 읽었다. 내장 음성으로 내려간다 */
         console.warn('[따라 읽기] 음성 파일 재생 실패 — 내장 음성으로 갑니다');
         hlReadTTS(live);
@@ -446,6 +815,11 @@
     if (!hlOn || !started) return;
     var lines = beats[bi] || [];
     if (!lines.length) return;
+    /* 책을 펴면 조판을 다시 하느라 여기까지 온다. 읽던 중이면 건드리지 않는다 —
+       안 그러면 펼치는 순간 낭독이 처음으로 되감긴다. */
+    var key = pi + ':' + bi;
+    if (Voice.playing && flowReadKey === key) { hlResync(); return; }
+    flowReadKey = key;
     var from = pi, fromBi = bi, mine = ++hlToken;
     var live = function () { return hlOn && pi === from && bi === fromBi && mine === hlToken; };
 
@@ -509,6 +883,7 @@
       onEnd: function () {
         if (!live()) return;
         hlStopRead();
+        flowNext();
       }
     });
   }
@@ -594,6 +969,12 @@
   }
 
   function startNarration() {
+    /* 이 판에는 '쪽 앞머리만 읽어 주는 낭독'이 없다.
+       소리는 둘 중 하나다 — 접혀 있으면 영상 소리, 펼치면 본문 전체 낭독.
+       여기를 살려 두면 영상을 눌러 놓고 그 위에 낭독을 얹어 소리가 겹친다. */
+    return;
+    /* eslint-disable no-unreachable */
+
     /* 따라 읽기가 켜져 있으면 그쪽이 읽는다.
        ※ 반드시 stopNarration() 보다 먼저 빠져나가야 한다. 쪽을 넘길 때
           showBeat() 가 먼저 읽기를 시작하는데, 여기서 stop 을 부르면 그걸 죽인다. */
@@ -707,14 +1088,81 @@
   function unlockGo() { $('#go').classList.remove('wait'); goLabel(); }
 
   /* #play는 이제 영상 소리 스위치다. 배경이 절차적 씬이면 소리가 없으므로 숨는다. */
-  function syncSound() {
-    var btn = $('#play'), on = Scenes.audioOn;
-    btn.hidden = !Scenes.hasVideo() || hlOn;
-    btn.innerHTML = on ? ICON.speaker : ICON.mute;
-    btn.setAttribute('aria-label', on ? '소리 끄기' : '소리 켜기');
-    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  /* ── 읽는 속도 ──
+     느리게는 두지 않는다 — 낭독이 이미 동화 읽어 주는 속도다.
+     숫자를 그대로 보여 준다. 아이콘으로는 "지금 몇 배"가 안 보인다. */
+  var RATES = [1, 1.25, 1.5];
+  var rateAt = 0;
+  function syncRate() {
+    var btn = $('#rate'); if (!btn) return;
+    var r = RATES[rateAt];
+    btn.innerHTML = '<b class="rate">' + r + '×</b>';
+    btn.setAttribute('aria-label', '읽는 속도 ' + r + '배 — 눌러서 바꾸기');
+    btn.setAttribute('aria-pressed', r === 1 ? 'false' : 'true');
   }
-  $('#play').onclick = function () { Scenes.setAudio(!Scenes.audioOn); syncSound(); };
+  function setRate(i) {
+    rateAt = (i + RATES.length) % RATES.length;
+    var r = RATES[rateAt];
+    Voice.setRate(r);
+    /* 영상도 같은 속도로 — 안 그러면 소리와 그림이 갈라진다.
+       scenes.js 를 건드리지 않으려고 화면의 <video> 를 직접 짚는다. */
+    var vs = document.querySelectorAll('#bg video');
+    for (var k = 0; k < vs.length; k++) { try { vs[k].playbackRate = r; } catch (e) {} }
+    /* 요약 낭독도 같은 속도로 — 빼 두면 영상만 빨라지고 요약만 늘어져 들린다 */
+    curRate = r;
+    if (sumAudio) { try { sumAudio.playbackRate = r; } catch (e) {} }
+    syncRate();
+  }
+  $('#rate').onclick = function () { setRate(rateAt + 1); };
+
+  /* ── 소리 크기 ──
+     스피커를 누르면 슬라이더가 버튼 위로 올라온다.
+     아이콘은 지금 크기를 말해 준다 — 꺼짐 / 작음 / 큼. */
+  var VOL_KEY = 'moc.vol';
+  var volOpen = false;
+  /* 기본을 가운데(0.5)에 둔다. <audio>.volume 의 천장이 1이라,
+     여기서 시작해야 위로 올릴 여지가 남는다. 1을 넘겨 키울 방법은 없고,
+     넘기려고 증폭을 걸면 튀는 구간이 잘려 나간다. */
+  var VOL_DEFAULT = 0.5;
+  /* 기본값이 바뀌면 예전에 저장해 둔 크기를 한 번 버린다.
+     안 그러면 새 기본값이 영영 안 먹고 손잡이가 끝에 붙어 있다. */
+  var VOL_RULE = 'moc.vol.rule', VOL_RULE_V = '2';
+  (function () {
+    try {
+      if (localStorage.getItem(VOL_RULE) === VOL_RULE_V) return;
+      localStorage.setItem(VOL_RULE, VOL_RULE_V);
+      localStorage.removeItem(VOL_KEY);
+    } catch (e) {}
+  })();
+  function volRead() {
+    try { var v = parseFloat(localStorage.getItem(VOL_KEY)); return (v >= 0 && v <= 1) ? v : VOL_DEFAULT; }
+    catch (e) { return VOL_DEFAULT; }
+  }
+  function syncSound() {
+    var btn = $('#play'), sl = $('#vol');
+    if (!btn) return;
+    btn.hidden = false;
+    var v = Voice.volume;
+    btn.innerHTML = v === 0 ? ICON.mute : ICON.speaker;
+    btn.style.opacity = v === 0 ? '.55' : '';
+    btn.setAttribute('aria-label', '소리 크기 ' + Math.round(v * 100) + '%');
+    btn.setAttribute('aria-pressed', volOpen ? 'true' : 'false');
+    if (sl) sl.value = Math.round(v * 100);
+    $('#stage').dataset.vol = volOpen ? 'open' : '';
+  }
+  function setVolume(v) {
+    Voice.setVolume(v);
+    try { localStorage.setItem(VOL_KEY, String(v)); } catch (e) {}
+    syncSound();
+  }
+  $('#play').onclick = function () { volOpen = !volOpen; syncSound(); };
+  $('#vol').oninput = function () { setVolume(+this.value / 100); };
+  /* 다른 곳을 누르면 슬라이더를 닫는다 */
+  addEventListener('pointerdown', function (e) {
+    if (!volOpen) return;
+    if (e.target.closest('#vol') || e.target.closest('#play')) return;
+    volOpen = false; syncSound();
+  });
 
   /* ── 다 읽었어요 / 계속 읽기 ──
      낭독이 끝나는 시점이 없어졌으므로 버튼은 처음부터 눌린다.
@@ -730,7 +1178,8 @@
     stopNarration();
     if (hlOn) setHl(false);
     $('#stage').dataset.end = 'on';
-    Scenes.show(END.bg, END.video, END.flip);
+    flowPoster(END.video);
+    Scenes.show(END.bg, flowVideo(END.video), END.flip);
     $('#theend').focus();
   }
   function leaveEnd() {
@@ -738,9 +1187,42 @@
     atEnd = false;
     $('#stage').dataset.end = 'off';
     var p = PAGES[pi];
-    Scenes.show(p.bg, p.video, p.flip);
-    $('#go').focus();
+    flowHushOld();
+    flowPoster(p.video);
+    Scenes.show(p.bg, flowVideo(p.video), p.flip);
+    $('#pnext').focus();
   }
+  /* 처음부터 다시. 마지막 화면에서 나가고, 시작할 때와 같은 상태로 되돌린다 */
+  function flowRestart() {
+    clearTimeout(flowTimer);
+    sumStop();
+    Voice.stop();
+    TTS.stop();
+    atEnd = false;
+    $('#stage').dataset.end = 'off';
+    flowVideoDone = false;
+    flowFoldTouched = false;
+    flowWantOpen = true;        /* 다시 잠깐 보여 주고 접는다 */
+    flowPeeking = true;
+    hlOn = false;
+    $('#app').dataset.read = 'on';
+    $('#stage').removeAttribute('data-suck');
+    $('#fold').innerHTML = ICON.book;
+    pi = 0;
+    syncDevPage();
+    render();
+    Scenes.setAudio(true);
+    syncSound();
+    setTimeout(function () {
+      if (flowFoldTouched || atEnd) return;
+      flowPeeking = false;
+      flowWantOpen = false;
+      setFold(true);
+      flowAudioMode();
+    }, FLOW_PEEK);
+  }
+  $('#again').onclick = function (e) { e.stopPropagation(); flowRestart(); };
+
   $('#theend').onclick = leaveEnd;
   $('#theend').onkeydown = function (e) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); leaveEnd(); }
@@ -754,20 +1236,11 @@
     if (END && pi === PAGES.length - 1 && answered) { showEnd(); return; }
     if (bi < beats.length - 1) {
       showBeat(bi + 1);
-    } else {
-      /* 문제와 보기를 한 번에 펼친다. 지문은 그대로 옆에 남는다 */
-      $('#app').dataset.q = 'open';
-      setTimeout(function () {
-        if ($('#app').dataset.read !== 'on') return;
-        /* 문제 띠가 열리면 본문 상자가 낮아진다. 여기서 다시 쪼개면(rebuild)
-           읽고 있던 글이 사라지고 다른 구간이 튀어나온다 — 읽던 사람 입장에서는
-           "누르니까 내용이 바뀌는" 셈이다. 구간은 건드리지 않고, 좁아진 자리에
-           들어가도록 이 상태에서만 크기를 맞춘다. */
-        paint(beats[bi]);
-        Fit.fitBeat($('#body'));
-        meter();
-      }, 450);
+      return;
     }
+    /* 이 판에는 문제가 없다. NEXT 는 곧장 다음 쪽으로 — 기다리지 않고 건너뛰고 싶을 때 쓴다 */
+    clearTimeout(flowTimer);
+    if (pi < PAGES.length - 1) goTo(pi + 1); else showEnd();
   };
 
   /* ── 문제 띠 ── */
@@ -1089,10 +1562,27 @@
     g.classList.add('off');
     started = true;
     setTimeout(function () { if (g.parentNode) g.remove(); }, 600);
-    Scenes.setAudio(true);      /* 소리 있는 자동재생은 사용자 제스처 뒤에만 허용된다 */
+    /* 영상 소리가 이야기를 나른다 */
+    Scenes.setAudio(true);
     Scenes.hold(false);        /* 여기서 비로소 0초부터 재생한다 */
     syncSound();
-    startNarration();
+
+    /* 글을 잠깐 보여 준 뒤 접는다. 기본은 '보고 듣기'다.
+       ※ flowPeeking 을 먼저 켜야 한다. 뒤에 켜면 flowAudioMode 가 부를 때
+          아직 '펼쳐진 것'으로 보여 본문 낭독이 시작돼 버린다. */
+    flowPeeking = true;
+    flowAudioMode();
+    /* 요약 자리 감시는 여기서 건다. 부팅 때 걸면 아직 '펼쳐진 것'으로 보여
+       바로 빠져나가고, 1쪽은 시작 자리(0초)를 놓친다. */
+    slotWatch();
+    setTimeout(function () { flowWarm(2); }, 1500);
+    setTimeout(function () {
+      if (flowFoldTouched || !started) return;
+      flowPeeking = false;
+      flowWantOpen = false;
+      setFold(true);
+      flowAudioMode();
+    }, FLOW_PEEK);
   }
   $('#gate').onclick = openGate;
   $('#gate').addEventListener('keydown', function (e) {
@@ -1228,11 +1718,23 @@
     var st = Scenes.status();
     if (PAGES[pi].video && st.source === '절차적' && /실패/.test(st.note || '')) {
       armNudge(NUDGE_IDLE);
+      /* 영상을 못 읽으면 'ended' 가 영영 안 온다. 진행이 멈추지 않게 시계로 대신한다 */
+      var from = pi;
+      setTimeout(function () {
+        if (pi !== from || flowVideoDone || atEnd) return;
+        flowVideoDone = true;
+        if (!flowOpen()) flowSummaryThenNext();
+      }, 6000);
     }
   });
 
   /* 영상이 마지막 장면에서 멈춘 순간 — 여기가 "이제 넘어갈 때"다 */
-  addEventListener('sceneended', function () { armNudge(NUDGE_AFTER_VIDEO); });
+  addEventListener('sceneended', function () {
+    armNudge(NUDGE_AFTER_VIDEO);
+    flowVideoDone = true;
+    /* 책이 펼쳐져 있으면 본문 낭독이 진행을 맡는다 — 요약은 건너뛴다 */
+    if (!flowOpen()) flowSummaryThenNext();
+  });
   addEventListener('resize', function () { stage(); relayout(); });
   addEventListener('orientationchange', function () {
     setTimeout(function () { stage(); relayout(); }, 300);
@@ -1249,6 +1751,8 @@
      받아 두는 것은 그대로다 — 누르면 곧바로, 그리고 0초부터 나간다. */
   Scenes.hold(true);
   setHl(false);              /* 아이콘·라벨 초기화 */
+  Voice.setVolume(volRead());
+  syncRate();
   syncSound();
   syncBarWidth();
   wbSync();

@@ -55,7 +55,8 @@ window.MOC.Voice = (function () {
     var my = ++token;
     var a = new Audio(DIR + d.file);
     a.preload = 'auto';
-    a.volume = 1;                       /* 음량은 파일에서 이미 맞췄다. 여기서 키우지 않는다 */
+    a.volume = vol;                     /* 음량은 파일에서 이미 맞췄다. 여기서 키우지 않는다 */
+    try { a.playbackRate = rate; a.volume = vol; } catch (e) {}
     el = a;
 
     var from = opts.from == null ? 0 : opts.from;
@@ -72,6 +73,12 @@ window.MOC.Voice = (function () {
     var step = function () {
       if (my !== token) return;
       var t = a.currentTime;
+      /* 자리 옮기기가 먹지 않았다면 앞부분이 통째로 나간다. 한 번 더 시도한다. */
+      if (from > 0.05 && t < from - 0.5) {
+        try { a.currentTime = from; } catch (e) {}
+        raf = requestAnimationFrame(step);
+        return;
+      }
       if (to != null && t >= to) { finish(true); return; }
       var i = wordAt(d.words, t);
       if (i !== last) {
@@ -81,26 +88,24 @@ window.MOC.Voice = (function () {
       raf = requestAnimationFrame(step);
     };
 
-    a.addEventListener('loadedmetadata', function () {
-      if (my !== token) return;
-      try { a.currentTime = from; } catch (e) {}
-    });
     a.addEventListener('ended', function () { finish(true); });
     a.addEventListener('error', function () {
       if (a.dead) return;              /* 멈추느라 뗀 것이지 실패가 아니다 */
       finish(false);
     });
 
-    var start = function () {
-      if (my !== token) return;
-      try { if (Math.abs(a.currentTime - from) > 0.05) a.currentTime = from; } catch (e) {}
+    /* 반드시 자리를 옮긴 뒤에 재생을 시작한다.
+       먼저 play() 를 부르면 0초부터 소리가 나가고, 그 뒤에 옮겨 봐야 이미 늦다 —
+       낱말 하나를 누른 것이 앞 문장 전체를 읽는 일이 된다. */
+    var begin = function () {
+      if (my !== token || a.dead) return;
+      try { a.currentTime = from; } catch (e) {}
       raf = requestAnimationFrame(step);
+      var pr = a.play();
+      if (pr && pr.catch) pr.catch(function () { if (!a.dead) finish(false); });
     };
-    if (a.readyState >= 1) start();
-    else a.addEventListener('loadeddata', start, { once: true });
-
-    var pr = a.play();
-    if (pr && pr.catch) pr.catch(function () { if (!a.dead) finish(false); });
+    if (a.readyState >= 1) begin();                       /* 이미 받아 둔 파일 */
+    else a.addEventListener('loadedmetadata', begin, { once: true });
     return true;
   }
 
@@ -112,7 +117,7 @@ window.MOC.Voice = (function () {
     if (!L) return false;
     opts = opts || {};
     opts.from = L.t;
-    opts.to = L.t1 + 0.12;             /* 끝소리가 잘리지 않게 살짝 여유 */
+    opts.to = Math.max(L.t1, L.t + 0.6) + 0.12;   /* 끝소리가 잘리지 않게 살짝 여유 */
     return play(n, opts);
   }
 
@@ -127,7 +132,8 @@ window.MOC.Voice = (function () {
     if (!w) return false;
     opts = opts || {};
     opts.from = Math.max(0, w.t - 0.04);
-    opts.to = w.t1 + 0.10;
+    /* 정렬이 짧게 잡힌 낱말이라도 들리기는 해야 한다 */
+    opts.to = Math.max(w.t1, w.t + 0.30) + 0.10;
     return play(n, opts);
   }
 
@@ -143,9 +149,27 @@ window.MOC.Voice = (function () {
     return play(n, opts);
   }
 
+  /* 재생 속도. 하이라이트는 currentTime 을 보고 짚으므로 속도를 바꿔도 따라온다 */
+  var rate = 1;
+  function setRate(r) {
+    rate = r;
+    if (el) { try { el.playbackRate = r; } catch (e) {} }
+  }
+  /* 소리 크기. 파일 자체는 이미 -14 LUFS 로 맞춰 두었으므로 여기서는 줄이기만 한다 —
+     1을 넘겨 키우면 튀는 구간이 잘려 나간다. */
+  var vol = 1;
+  function setVolume(v) {
+    vol = Math.max(0, Math.min(1, v));
+    if (el) { try { el.volume = vol; } catch (e) {} }
+  }
+
   return {
     has: has, play: play, playLine: playLine, playWord: playWord,
-    playLines: playLines, stop: stop,
+    playLines: playLines, stop: stop, setRate: setRate, setVolume: setVolume,
+    get rate() { return rate; },
+    get volume() { return vol; },
+    /* 지금 재생 위치. 화면을 다시 그린 뒤 하이라이트를 그 자리에 맞출 때 쓴다 */
+    get time() { return el ? el.currentTime : 0; },
     get playing() { return !!el; },
     /* 검증용 */
     info: function (n) { var d = data(n); return d ? { file: d.file, words: d.words.length,

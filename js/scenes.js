@@ -10,6 +10,21 @@
 
 window.MOC = window.MOC || {};
 
+/* ── 미디어에도 판 번호를 붙인다 ──
+   HTML 의 ?v= 만 올리고 mp4·jpg 주소는 그대로 두면, 영상을 갈아 끼워도
+   브라우저는 캐시에 둔 옛 파일을 계속 쓴다. 화면에는 이전 장면이 나오는데
+   디스크의 파일은 새 것이라 원인을 찾기 어렵다. 스크립트에 붙은 번호를
+   그대로 물려 쓰면 HTML 을 갱신할 때 미디어도 함께 새로 받는다. */
+window.MOC.av = (function () {
+  var stamp = '';
+  try {
+    var el = document.querySelector('script[src*="?v="]');
+    var m = el && el.src.match(/[?&]v=(\d+)/);
+    if (m) stamp = '?v=' + m[1];
+  } catch (e) {}
+  return function (url) { return url + stamp; };
+})();
+
 window.MOC.Scenes = (function () {
 
   var REDUCED = false;
@@ -23,6 +38,12 @@ window.MOC.Scenes = (function () {
   var status = { key: null, source: '—', note: '' };   /* 검증 패널이 읽는다 */
   var playingVideo = null;   /* 지금 재생 중인 mp4 파일명 */
   var playingEl = null;      /* 그 <video> 요소. 끝났는지 확인해야 한다 */
+  /* ── 붙들기 ──
+     시작 화면이 떠 있는 동안에도 부팅 때 첫 쪽 영상을 붙인다 — 받아 두어야
+     누르는 즉시 나오기 때문이다. 그런데 그대로 두면 가림막 뒤에서 재생이
+     흘러가, 시작을 누른 시점에는 이미 중간이다. 그래서 첫 프레임에 세워 두고
+     hold(false) 때 0초부터 내보낸다. */
+  var held = false;
 
   /* ── 소리 ──
      브라우저는 소리 있는 자동재생을 막는다. 그래서 처음에는 음소거로 깔아 두고,
@@ -799,7 +820,7 @@ window.MOC.Scenes = (function () {
     v.playsInline = true; v.setAttribute('playsinline', '');
     v.setAttribute('aria-hidden', 'true');
     v.preload = 'auto';
-    v.src = 'assets/videos/' + video;
+    v.src = window.MOC.av('assets/videos/' + video);
     var settled = false;
     var fail = function (why) {
       if (settled) return; settled = true;
@@ -855,15 +876,42 @@ window.MOC.Scenes = (function () {
       });
       /* 반드시 처음으로 되감고 나서 재생한다.
          브라우저가 캐시된 재생 위치를 물고 오는 경우가 있다. */
-      try { v.currentTime = 0; } catch (e) {}
+      rewindPlay(v);
+    });
+  }
+
+  /* 0초로 되감고 재생한다. 붙들린 동안에는 첫 프레임에 세워 두기만 한다.
+     currentTime 대입은 곧바로 끝나지 않으므로 되감기가 끝난 뒤에 play 한다 —
+     먼저 play 하면 되감기 이전 위치가 잠깐 흘러 "중간부터"로 보인다. */
+  function rewindPlay(v) {
+    var go = function () {
+      if (playingEl !== v) return;
+      if (held) { try { v.pause(); } catch (e) {} return; }
       var pr = v.play();
       if (pr && pr.catch) pr.catch(function () {});
-    });
+    };
+    if (v.currentTime > 0.02) {
+      v.addEventListener('seeked', go, { once: true });
+      try { v.currentTime = 0; } catch (e) { go(); }
+    } else {
+      try { v.currentTime = 0; } catch (e) {}
+      go();
+    }
+  }
+
+  /* 시작 게이트가 쓴다. hold(true) 로 세워 두었다가 hold(false) 로 내보낸다 */
+  function hold(on) {
+    held = !!on;
+    if (held) {
+      if (playingEl) { try { playingEl.pause(); playingEl.currentTime = 0; } catch (e) {} }
+      return;
+    }
+    if (playingEl) rewindPlay(playingEl);
   }
 
   function keys() { return Object.keys(S); }
 
-  return { mount: mount, show: show, keys: keys, reduced: REDUCED,
+  return { mount: mount, show: show, keys: keys, reduced: REDUCED, hold: hold,
            setAudio: setAudio, duck: duck, hasVideo: hasVideo,
            get audioOn() { return audioOn; },
            status: function () { return status; } };

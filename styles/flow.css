@@ -1,0 +1,335 @@
+/* ══════════════════════════════════════════════════════════════
+   flow.css — 이어서 보기 판
+
+   reader.css 뒤에 얹는다. 구조는 그대로 두고 필요한 것만 덜어낸다.
+   문제가 없고, 쪽은 낭독이 끝나면 스스로 넘어간다.
+   ══════════════════════════════════════════════════════════════ */
+
+/* 문제 띠와 그 부속. 이 판에는 풀 것이 없다 */
+#quiz, #requiz, #resbtn { display:none !important; }
+
+/* 따라 읽기 버튼은 없앤다. 이 판은 처음부터 읽어 주는 것이 기본이고,
+   글을 보고 감추는 일은 책 버튼 하나가 맡는다. */
+#hl { display:none !important; }
+
+/* 스피커 자리를 읽는 속도로 쓴다. 숫자를 그대로 보여 준다 */
+/* 속도 버튼 — 다른 원형 버튼과 같은 규격이되, 1.25× 가 들어가게 폭은 내용에 맞춘다 */
+#rate{
+  min-width:37px; height:37px; width:auto; padding:0 9px; border-radius:19px;
+  border:1.5px solid var(--softer); background:transparent; color:inherit;
+  cursor:pointer; flex:0 0 auto; position:relative;
+  display:flex; align-items:center; justify-content:center;
+  transition:border-color .18s, color .18s;
+}
+#rate::before{ content:''; position:absolute; inset:-4px; border-radius:19px }
+#rate[aria-pressed="true"]{ border-color:var(--act); color:var(--act) }
+#rate .rate{
+  font-family:'Pretendard',sans-serif;font-size:12.5px;font-weight:700;
+  letter-spacing:-.01em;font-variant-numeric:tabular-nums;line-height:1;
+  white-space:nowrap;
+}
+
+/* ── 소리 크기 ──
+   스피커를 누르면 슬라이더가 버튼 위로 올라온다.
+   바 안에 늘 펼쳐 두면 자리를 많이 먹고, 읽는 중에는 쓸 일이 드물다. */
+/* 세로 막대. range 를 세우는 표준 방법은 브라우저마다 달라서,
+   가로 막대를 돌려 쓴다 — 사파리·크롬 어디서나 같게 동작한다.
+   돌려도 레이아웃 상자는 그대로라 감싼 상자에 최종 크기를 준다. */
+.volwrap{
+  position:absolute; bottom:calc(100% + 10px); right:2px;
+  width:46px; height:158px; border-radius:23px;
+  background:var(--pnl); border:1px solid var(--pln);
+  -webkit-backdrop-filter:var(--glass); backdrop-filter:var(--glass);
+  opacity:0; pointer-events:none; transform:translateY(8px);
+  transition:opacity .2s ease, transform .22s var(--ease);
+}
+#stage[data-vol="open"] .volwrap{ opacity:1; pointer-events:auto; transform:none }
+
+#vol{
+  -webkit-appearance:none; appearance:none;
+  position:absolute; left:50%; top:50%; margin:0;
+  width:118px; height:4px; border-radius:99px;
+  background:var(--softer); outline:none;
+  transform:translate(-50%,-50%) rotate(-90deg);
+}
+#vol::-webkit-slider-thumb{
+  -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+  background:var(--act); cursor:pointer; border:0;
+}
+#vol::-moz-range-thumb{
+  width:16px; height:16px; border-radius:50%; background:var(--act);
+  cursor:pointer; border:0;
+}
+#vol:focus-visible{ box-shadow:0 0 0 3px var(--act-glow) }
+#play[aria-pressed="true"]{ border-color:var(--act); color:var(--act) }
+
+/* NEXT 버튼과 그 신호를 없앤다.
+   스스로 넘어가는 판에서 "다음" 버튼은 무엇을 하는지 애매하고,
+   건너뛰는 일은 왼쪽 페이저 화살표가 이미 맡고 있다. */
+.go-wrap { display:none !important; }
+
+/* 버튼이 빠진 만큼 바가 헐렁해지지 않게 내용 폭으로 줄인다 */
+#ctl { justify-content:flex-end; gap:9px; position:relative; }  /* 볼륨 슬라이더의 기준 */
+#pager { margin-right:auto; }
+
+/* 읽는 동안에는 컨트롤 바를 물러나게 둔다.
+   화면에서 눈을 떼지 않고 보게 하는 것이 이 판의 목적이다.
+   손을 대면(포커스·호버) 다시 또렷해진다. */
+#ctl { transition:opacity .6s var(--ease); }
+#stage[data-flow="reading"] #ctl { opacity:.28; }
+#stage[data-flow="reading"] #ctl:hover,
+#stage[data-flow="reading"] #ctl:focus-within { opacity:1; }
+
+/* 쪽이 넘어가는 순간을 부드럽게 — 글이 툭 바뀌면 흐름이 끊긴다 */
+#sheet { transition:opacity .2s var(--ease); }
+#stage[data-flow="turning"] #sheet { opacity:0; }
+
+/* 장면 사이 크로스페이드. 기본은 0.8초인데, 이 판은 쪽이 저절로 넘어가므로
+   그만큼 기다리면 장면과 장면이 끊긴 것처럼 느껴진다. */
+#bg .layer{ transition:opacity .38s ease }
+
+/* 진행 막대 — 지금 어디쯤인지 화면 맨 위에 실선 하나로만 알린다.
+   쪽 번호를 크게 띄우면 "읽는 중"이 아니라 "진도 확인"이 된다. */
+#flowbar {
+  position:absolute; left:0; top:0; height:2px; width:0;
+  background:var(--act); z-index:40; pointer-events:none;
+  transition:width .3s linear;
+}
+@media(prefers-reduced-motion:reduce){
+  #sheet, #ctl, #flowbar { transition:none; }
+}
+
+/* ── 글이 물러나는 방식 ──
+   reader.css 의 접기를 그대로 쓰되, 이 판에서는 조금 더 멀리·조금 더 길게 보낸다.
+   "누르면 접힌다"가 아니라 "스스로 물러난다"로 읽혀야 한다. */
+#app{ transition:grid-template-columns .62s cubic-bezier(.6,0,.2,1) }
+#read{ transition:opacity .42s var(--ease), transform .62s cubic-bezier(.6,0,.2,1) }
+[data-read="off"] #read{ transform:translateX(56px) }
+
+/* 글이 접혀 있으면 화면에 남는 것은 컨트롤 바뿐이다.
+   너무 흐리면 되돌아올 길이 안 보인다 — 특히 손가락으로 쓰는 화면에서. */
+#stage[data-flow="reading"] #app[data-read="off"] #ctl{ opacity:.5 }
+
+
+/* ══ 책 아이콘으로 빨려 들어가기 ══
+   맥의 최소화는 창이 '깔때기'가 되는 것이 핵심이다.
+   아래가 버튼 폭으로 좁아지고, 그 구멍으로 내용이 빨려 내려간다.
+
+   3D 원근(rotateX)도 해 봤다. 내용이 저절로 찌그러지는 장점이 있지만,
+   물러난 쪽이 소실점으로 수렴하면서 패널이 화면 위로 딸려 올라가고
+   버튼 쪽으로 겨냥이 안 된다. 그래서 모양을 직접 오려 내는 쪽을 쓴다.
+
+   부드럽게 만드는 데 중요한 것 셋:
+     1. 가속도 곡선은 전체에 하나만(linear). 구간마다 다른 곡선을 주면
+        경계에서 속도가 튀어 뚝뚝 끊긴다. 빠르고 느림은 키프레임 간격으로 낸다.
+     2. 도는 동안 배경 흐림을 끈다. backdrop-filter 는 매 프레임 다시 계산돼서
+        clip-path 와 함께 쓰면 프레임이 떨어진다.
+     3. 오려 내기는 모양만 자른다. 글에도 같은 리듬으로 축소를 걸어야
+        '종이는 접혔는데 글씨는 그대로'가 되지 않는다.
+
+   모이는 지점(--oxp)과 버튼까지의 거리(--gy)는 js 가 잰다. */
+#stage[data-suck="in"] #read,
+#stage[data-suck="out"] #read{
+  transform:none !important; opacity:1 !important; transition:none !important;
+  /* 패널이 버튼 쪽으로 상자 밖까지 내려간다. 잘라 두면 중간에 사라진다 */
+  overflow:visible !important;
+}
+/* 다 빨려 들어간 뒤. 애니메이션을 떼면 패널이 원래 크기로 되돌아오고,
+   그게 '줄었다가 다시 커지는 잔상'으로 보인다. 숨김을 유지한다. */
+#stage[data-suck="done"] #sheet{
+  opacity:0 !important; visibility:hidden !important;
+}
+#stage[data-suck="in"] #sheet,
+#stage[data-suck="out"] #sheet{
+  -webkit-backdrop-filter:none !important; backdrop-filter:none !important;
+  background:var(--pnl);
+  will-change:clip-path, transform, opacity;
+  backface-visibility:hidden;
+  /* 평소 #sheet 에 걸린 opacity 트랜지션(.45s)이 애니메이션과 겹치면
+     끝난 뒤에도 혼자 서서히 사라져 잔상으로 보인다. 도는 동안은 끈다. */
+  transition:none !important;
+}
+/* 접힌 뒤에는 본문 상자도 자리에서 완전히 비운다.
+   숨김만으로는 합성 레이어가 남아 희미한 흔적이 보이는 기기가 있다. */
+#stage[data-suck="done"] #read{ visibility:hidden }
+/* 모양(suckIn)과 흐림(suckFade)을 따로 돌린다. 바꾸는 속성이 달라 겹치지 않고,
+   키프레임이 짧게 유지된다. */
+#stage[data-suck="in"]  #sheet{ animation:suckIn .22s linear forwards,
+                                          suckFade .22s linear forwards }
+#stage[data-suck="out"] #sheet{ animation:suckIn .28s linear reverse backwards,
+                                          suckFade .28s linear reverse backwards }
+
+/* 꼭짓점 여섯 개.
+   위 네 점은 상자 모서리를 그대로 두고, 아래 두 점만 한 점으로 모은다.
+   오므라드는 지점(k)이 위로 올라오면서 '끌려 들어가는 구간'이 커진다.
+
+   사다리꼴로 만들면 깔때기라는 물건으로 보인다 — 네모의 아래가
+   점으로 빨려 들어가는 모습이어야 한다. */
+@keyframes suckIn{
+  0%  { clip-path:polygon(0% 0%, 100% 0%, 100% 100%,
+                          calc(var(--oxp,90%) + 50%) 100%,
+                          calc(var(--oxp,90%) - 50%) 100%, 0% 100%);
+        transform:translateY(0); opacity:1 }
+  20% { clip-path:polygon(0% 0%, 100% 0%, 100% 64%,
+                          calc(var(--oxp,90%) + 24%) 100%,
+                          calc(var(--oxp,90%) - 24%) 100%, 0% 64%) }
+  40% { clip-path:polygon(0% 0%, 100% 0%, 100% 40%,
+                          calc(var(--oxp,90%) + 12%) 100%,
+                          calc(var(--oxp,90%) - 12%) 100%, 0% 40%) }
+  60% { clip-path:polygon(0% 0%, 100% 0%, 100% 22%,
+                          calc(var(--oxp,90%) + 6%) 100%,
+                          calc(var(--oxp,90%) - 6%) 100%, 0% 22%);
+        transform:translateY(0); opacity:1 }
+  78% { clip-path:polygon(0% 0%, 100% 0%, 100% 18%,
+                          calc(var(--oxp,90%) + 5%) 100%,
+                          calc(var(--oxp,90%) - 5%) 100%, 0% 18%);
+        transform:translateY(calc(var(--gy,40px) * .22)) }
+  90% { clip-path:polygon(0% 0%, 100% 0%, 100% 7%,
+                          calc(var(--oxp,90%) + 2.5%) 100%,
+                          calc(var(--oxp,90%) - 2.5%) 100%, 0% 7%);
+        transform:translateY(calc(var(--gy,40px) * .62)); opacity:.7 }
+  100%{ clip-path:polygon(0% 0%, 100% 0%, 100% 0%,
+                          calc(var(--oxp,90%) + 1%) 100%,
+                          calc(var(--oxp,90%) - 1%) 100%, 0% 0%);
+        transform:translateY(var(--gy,40px)); opacity:0 }
+}
+
+/* 좁아지는 아래쪽을 점점 흐리게 한다.
+   끝이 진하면 '잘린 종이'로 보인다 — 흐려져야 사라지는 것으로 읽힌다.
+   위는 끝까지 진하게 두어 '아직 남은 부분'이 분명하다. */
+@keyframes suckFade{
+  0%  { -webkit-mask-image:linear-gradient(to bottom, #000 0%, #000 100%, rgba(0,0,0,0) 145%);
+                mask-image:linear-gradient(to bottom, #000 0%, #000 100%, rgba(0,0,0,0) 145%) }
+  28% { -webkit-mask-image:linear-gradient(to bottom, #000 0%, #000 74%, rgba(0,0,0,0) 116%);
+                mask-image:linear-gradient(to bottom, #000 0%, #000 74%, rgba(0,0,0,0) 116%) }
+  56% { -webkit-mask-image:linear-gradient(to bottom, #000 0%, #000 46%, rgba(0,0,0,0) 92%);
+                mask-image:linear-gradient(to bottom, #000 0%, #000 46%, rgba(0,0,0,0) 92%) }
+  84% { -webkit-mask-image:linear-gradient(to bottom, #000 0%, #000 18%, rgba(0,0,0,0) 62%);
+                mask-image:linear-gradient(to bottom, #000 0%, #000 18%, rgba(0,0,0,0) 62%) }
+  100%{ -webkit-mask-image:linear-gradient(to bottom, #000 0%, #000 0%, rgba(0,0,0,0) 38%);
+                mask-image:linear-gradient(to bottom, #000 0%, #000 0%, rgba(0,0,0,0) 38%) }
+}
+
+/* 글도 같은 리듬으로 눌려 깔때기 속으로 들어간다 */
+#stage[data-suck="in"] #sheet .body,
+#stage[data-suck="out"] #sheet .body{
+  transform-origin:var(--oxp, 90%) 100%;
+  will-change:transform;
+}
+/* 글과 종이가 한 몸으로 움직인다.
+   시간도 곡선도 같게 맞춰 두 동작으로 갈라지지 않게 한다. */
+#stage[data-suck="in"]  #sheet .body{ animation:suckText .22s linear forwards }
+#stage[data-suck="out"] #sheet .body{ animation:suckText .28s linear reverse backwards }
+
+/* 키프레임 자리를 suckIn 과 똑같이 두고(0·20·40·60·78·90·100),
+   눌리는 정도를 오므라드는 지점(k=100·78·56·36·18·7·0)에 맞춘다.
+   숫자가 어긋나면 글과 종이가 따로 노는 것이 그대로 보인다. */
+@keyframes suckText{
+  0%  { transform:scale(1, 1) }
+  20% { transform:scale(.99, .66) }
+  40% { transform:scale(.95, .42) }
+  60% { transform:scale(.86, .24) }
+  78% { transform:scale(.66, .12) }
+  90% { transform:scale(.40, .05) }
+  100%{ transform:scale(.05, .01) }
+}
+
+/* 도착할 즈음 책 버튼이 한 번 받는다 — 어디로 들어갔는지 보이게 한다 */
+#stage[data-suck="in"] #fold{ animation:foldCatch .40s cubic-bezier(.3,1.6,.5,1) .50s }
+@keyframes foldCatch{
+  0%  { transform:scale(1) }
+  35% { transform:scale(1.22); border-color:var(--act); color:var(--act) }
+  100%{ transform:scale(1) }
+}
+
+@media(prefers-reduced-motion:reduce){
+  #stage[data-suck="in"] #sheet,
+  #stage[data-suck="out"] #sheet,
+  #stage[data-suck="in"] #sheet .body,
+  #stage[data-suck="out"] #sheet .body,
+  #stage[data-suck="in"] #fold{ animation:none }
+}
+
+/* ══ 버튼을 1.5배로 ══
+   아이패드에서 손가락으로 쓰는 화면이라 여유가 필요하다.
+   원형 37 → 56px, 아이콘 20 → 30px. 바의 여백·간격·글자도 같은 비율로 올려
+   버튼만 커지고 바가 답답해지는 일이 없게 한다.
+
+   ※ 바가 넓어지면 본문 상자도 같이 넓어진다 — 둘이 max(비율, 바 폭) 이라는
+     같은 식을 쓰기 때문이다. 조판이 흔들리지 않는지 확인하고 정한 값이다. */
+#ctl{
+  padding:11px 17px 11px 23px;
+  gap:13px;
+}
+#wbbtn, #fold, #play{
+  width:56px; height:56px;
+}
+#wbbtn svg, #fold svg, #play svg{ width:30px; height:30px }
+#wbbtn::before, #fold::before, #play::before, #rate::before{ inset:-6px }
+#wbcount{
+  top:-4px; right:-4px; min-width:26px; height:26px; padding:0 7px;
+  border-radius:13px; font-size:14px; line-height:26px;
+}
+#rate{
+  min-width:56px; height:56px; padding:0 14px; border-radius:28px;
+}
+#rate .rate{ font-size:18px }
+
+/* 페이저도 같은 비율로 */
+#pager button{ width:44px; height:44px; border-radius:13px; font-size:29px }
+#pager button::after{ inset:-8px }
+.pglab{ font-size:16px; letter-spacing:.12em; margin-right:8px }
+#pnum{ font-size:22px; min-width:68px }
+
+/* 볼륨 막대도 버튼에 맞춰 키운다 */
+.volwrap{
+  right:2px; width:64px; height:206px; border-radius:32px;
+  bottom:calc(100% + 12px);
+}
+#vol{ width:158px; height:5px }
+#vol::-webkit-slider-thumb{ width:22px; height:22px }
+#vol::-moz-range-thumb{ width:22px; height:22px }
+
+
+/* ══ 영상이 붙기 전에 첫 프레임을 깔아 둔다 ══
+   scenes.js 는 영상을 받는 동안 절차적 씬(Canvas 도형)을 띄운다.
+   흐름 판은 쪽이 저절로 넘어가 그 그림이 자주 눈에 띈다.
+
+   그래서 절차적 씬을 숨기고, 그 자리에 영상의 첫 프레임을 깐다.
+   같은 그림이 이어지므로 영상이 붙는 순간이 안 보인다.
+   영상을 아예 못 읽어도 정지 화면으로 남아 도형보다 낫다. */
+#bg canvas.layer{ opacity:0 !important }
+#bg{
+  background-size:cover;
+  background-position:center;
+  background-repeat:no-repeat;
+  /* background-image 는 트랜지션이 안 먹는다(값이 보간되지 않는다).
+     장면 전환은 위에 얹힌 .layer 들의 투명도가 맡는다 — 옛 장면이 사라지면서
+     그 아래의 새 첫 프레임이 드러나는 방식이라 포스터가 튀어 보이지 않는다. */
+}
+
+
+/* ══ 마지막 화면의 다시 보기 ══
+   THE END 아래에 한 박자 늦게 떠오른다 — 글자가 자리를 잡은 뒤에 나와야
+   '끝났다'가 먼저 읽히고 '또 볼까'가 그다음이 된다. */
+#theend{ flex-direction:column; gap:34px }
+#again{
+  display:inline-flex; align-items:center; gap:11px;
+  min-height:56px; padding:0 26px; border-radius:var(--r-pill);
+  font-family:'Pretendard',sans-serif; font-size:16px; font-weight:700;
+  letter-spacing:.06em; cursor:pointer;
+  background:transparent; color:var(--act);
+  border:1.5px solid var(--act);
+  opacity:0;
+}
+#again svg{ width:22px; height:22px }
+#again:hover{ background:rgba(var(--act-rgb), .12) }
+#again:active{ transform:translateY(1px) }
+#stage[data-end="on"] #again{ animation:againIn .7s var(--ease) 1.15s both }
+@keyframes againIn{
+  from{ opacity:0; transform:translateY(14px) }
+  to  { opacity:1; transform:none }
+}
+@media(prefers-reduced-motion:reduce){
+  #stage[data-end="on"] #again{ animation:none; opacity:1 }
+}
