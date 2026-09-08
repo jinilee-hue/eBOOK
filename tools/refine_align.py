@@ -85,6 +85,7 @@ def main():
             continue
         env = envelope(f)
         w = d['words']
+        orig = [(x['t'], x['t1']) for x in w]   # 되돌릴 자리
         deltas = []
         for i, x in enumerate(w):
             prev = w[i - 1] if i else None
@@ -93,11 +94,15 @@ def main():
 
             # 시작 — 앞쪽을 넓게 뒤진다. 낱말 머리가 잘리는 것보다
             # 앞의 조용한 데서 시작하는 편이 낫다.
+            #
+            # ※ 순서를 절대 뒤집지 않는다. 하이라이트는 이진 탐색으로 자리를
+            #   찾으므로 t 가 오름차순이 아니면 엉뚱한 낱말을 짚는다.
+            #   앞 낱말의 '시작'보다 앞으로는 못 가게 막는다.
             lo = t0 - BACK
             if prev:
-                lo = max(lo, prev['t1'])
+                lo = max(lo, prev['t'] + 0.02, prev['t1'])
             q = quietest(env, max(0, lo), t0 + FWD, t0)
-            if q is not None and q < t10 - 0.05:
+            if q is not None and q < t10 - 0.05 and (not prev or q > prev['t']):
                 deltas.append(abs(q - t0)); x['t'] = round(q, 3)
 
             # 끝 — 뒤쪽을 뒤지되 다음 낱말을 넘지 않는다
@@ -107,6 +112,28 @@ def main():
             q = quietest(env, t10 - FWD, hi, t10)
             if q is not None and q > x['t'] + 0.05:
                 deltas.append(abs(q - t10)); x['t1'] = round(q, 3)
+
+            # 마지막 그물 — 그래도 어긋났으면 원래 값으로 되돌린다
+            if prev and (x['t'] <= prev['t'] or x['t1'] < x['t']):
+                x['t'], x['t1'] = t0, t10
+
+        # ── 마지막 정리 ──
+        # 경계를 하나씩 옮기다 보면 앞뒤가 뒤집히는 낱말이 생긴다. 하이라이트는
+        # 이진 탐색으로 자리를 찾으므로 t 가 오름차순이 아니면 엉뚱한 낱말을 짚는다.
+        # 어긋난 낱말은 원래 값으로 되돌리고, 그래도 어긋나면 앞 낱말 뒤에 붙인다.
+        fixed = 0
+        for i in range(1, len(w)):
+            x, pv = w[i], w[i - 1]
+            if x['t'] <= pv['t'] or x['t1'] < x['t']:
+                x['t'], x['t1'] = orig[i]
+                fixed += 1
+            if x['t'] <= pv['t']:
+                x['t'] = round(pv['t'] + 0.02, 3)
+                fixed += 1
+            if x['t1'] < x['t']:
+                x['t1'] = round(x['t'] + 0.05, 3)
+        if fixed:
+            print(' %2s  순서가 어긋난 %d개를 되돌림' % (n, fixed))
 
         if deltas:
             deltas.sort()

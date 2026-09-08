@@ -336,3 +336,15 @@
 @media(prefers-reduced-motion:reduce){
   #stage[data-end="on"] #again{ animation:none; opacity:1 }
 }
+
+/* ══ 낱말 카드 — 카드만 보인다 ══
+   기본 리더는 카드 뒤를 어둡게 덮고 흐린다. 이 판에서는 그 덮개가 본문 위에
+   긴 빈 상자처럼 얹혀 보인다. 덮지 않는다 — 본문이 그대로 보여야 그 낱말이
+   어느 문장에 있었는지 눈으로 좇을 수 있다.
+   누르면 닫히는 동작은 그대로다(투명해도 클릭은 받는다). */
+#scrim{
+  background:transparent;
+  backdrop-filter:none; -webkit-backdrop-filter:none;
+}
+/* 덮개가 없으니 카드가 배경에서 떨어져 보여야 한다 */
+#scrim #modal{ box-shadow:0 22px 60px rgba(0,0,0,.46), 0 3px 10px rgba(0,0,0,.28) }

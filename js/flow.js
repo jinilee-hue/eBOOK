@@ -107,8 +107,10 @@
      끝난 뒤에 두면 겹칠 일이 없고 쪽마다 규칙이 같다. */
   var sumAudio = null;
   var sumPlaying = false;
+  var sumGuard = 0;
   function sumStop() {
     sumPlaying = false;
+    if (sumGuard) { clearInterval(sumGuard); sumGuard = 0; }
     if (!sumAudio) return;
     sumAudio.dead = true;
     sumAudio.pause();
@@ -139,6 +141,14 @@
     };
     a.addEventListener('ended', end);
     a.addEventListener('error', end);      /* 파일이 없어도 흐름은 이어진다 */
+    /* ── 파수꾼 ──
+       책을 펴는 길이 여럿이라(버튼·되돌리기·쪽 넘김·카드 닫기) 어느 한 곳을
+       빠뜨리면 요약이 본문 낭독 위에 얹힌다. 시작할 때 한 번 막는 것으로는
+       모자라니, 나가는 동안에도 지켜보다가 낭독이 시작되면 바로 끈다. */
+    sumGuard = setInterval(function () {
+      if (!sumPlaying) { clearInterval(sumGuard); sumGuard = 0; return; }
+      if (flowOpen() || hlOn || Voice.playing) sumStop();
+    }, 60);
     var pr = a.play();
     if (pr && pr.catch) pr.catch(end);
   }
@@ -154,11 +164,13 @@
     if (!started || atEnd) return;
     clearTimeout(flowTimer);
     if (flowOpen()) {
-      /* 본문 낭독으로 넘어간다 — 요약은 여기서 멈춘다 */
+      /* 본문 낭독으로 넘어간다 — 요약도 영상 소리도 여기서 멈춘다.
+         0.08 로 낮추기만 하면 배경 대사가 낭독 밑에 깔려 둘 다 흐려진다.
+         책을 편 동안은 성우 목소리 하나만 들려야 한다. */
       sumStop();
       clearInterval(slotTimer);
       hlOn = true;
-      Scenes.duck(true, 0.08);
+      Scenes.duck(true, 0);
       hlRead();                       /* 본문 전체 낭독 + 하이라이트 */
       return;
     }
@@ -196,15 +208,22 @@
     var K = window.MOC.SUMMARY_SKIP;
     return !!(K && K.indexOf(n) >= 0);
   }
+  var slotFor = -1;      /* 지금 감시 중인 쪽 */
   function slotWatch() {
+    var page = PAGES[pi].n;
+    /* 같은 쪽을 두 번 걸지 않는다. openGate 와 render 가 둘 다 부르는 바람에
+       감시가 두 개 돌아 요약이 두 번 나갔다 — 두 목소리가 겹쳐 들렸다. */
+    if (slotFor === page && (slotTimer || slotDone)) return;
+    slotFor = page;
     clearInterval(slotTimer);
+    slotTimer = 0;
     slotDone = false;
     if (slotSkip(PAGES[pi].n)) return;
     var at = slotAt(PAGES[pi].n);
     if (at === null || flowOpen()) return;
     var from = pi, t0 = Date.now();
     slotTimer = setInterval(function () {
-      if (pi !== from || slotDone || flowOpen()) { clearInterval(slotTimer); return; }
+      if (pi !== from || slotDone || flowOpen()) { clearInterval(slotTimer); slotTimer = 0; return; }
       /* 영상이 있으면 그 재생 위치를, 없으면(못 읽었을 때) 시계를 쓴다.
          영상 요소만 보고 있으면 영상이 안 뜨는 기기에서 요약이 영영 안 나온다. */
       var v = document.querySelector('#bg video');
@@ -531,12 +550,18 @@
     flowVideoDone = false;
     sumStop();
     tailReplay(false);
-    requestAnimationFrame(function () { flowAudioMode(); slotWatch(); });
     /* 영상이 있는 쪽은 재생이 끝나는 시점을 기다린다. 없으면 시간으로 간다.
        ※ 영상이 있어도 안전망을 하나 둔다 — 파일이 크거나 재생이 막히면
           'ended' 가 영영 안 와서 신호가 아예 안 뜬다. */
     armNudge(p.video ? NUDGE_STUCK : NUDGE_IDLE);
-    requestAnimationFrame(function () { rebuild(); showBeat(0); startNarration(); });
+    /* 반드시 이 순서다 — 조판을 다시 하고(rebuild) 읽기 구간을 잡은(showBeat)
+       뒤에 소리를 건다. 뒤집으면 hlRead 가 '이전 쪽의 구간'으로 읽을 자리를
+       계산해, 엉뚱한 구간을 짧게 읽고 끝나 버린다. 그러면 낭독이 안 끝났는데
+       다음 쪽으로 넘어간다 — 2쪽부터 그랬다. */
+    requestAnimationFrame(function () {
+      rebuild(); showBeat(0); startNarration();
+      flowAudioMode(); slotWatch();
+    });
   }
 
   /* ── 검증 패널 계측 ── */
@@ -884,10 +909,25 @@
   }
 
   /* fromT 를 주면 그 자리부터, 안 주면 이 구간 처음부터 */
+  /* 카드가 열려 있나 — 낱말·문장·단어장·결과 */
+  function cardOpen() {
+    return $('#scrim').classList.contains('on') ||
+           $('#wbscrim').classList.contains('on') ||
+           $('#resscrim').classList.contains('on');
+  }
+
   function hlReadAt(fromT) {
     if (!hlOn || !started) return false;
+    /* 카드를 열어 둔 동안에는 낭독을 시작하지 않는다.
+       조판을 다시 하거나 화면이 바뀌면 showBeat → hlRead 로 여기까지 오는데,
+       그때 낭독이 되살아나 낱말 발음 위에 겹쳤다. */
+    if (cardOpen()) return false;
     var lines = beats[bi] || [];
     if (!lines.length) return false;
+    /* 낭독이 시작되는 자리는 여기 하나뿐이다. 요약은 여기서 확실히 끊는다 —
+       두 목소리가 겹치면 둘 다 안 들린다. 요약 시각을 재던 타이머도 함께 끈다. */
+    sumStop();
+    clearInterval(slotTimer); slotTimer = 0;
     flowReadKey = pi + ':' + bi;
     var from = pi, fromBi = bi, mine = ++hlToken;
     var live = function () { return hlOn && pi === from && bi === fromBi && mine === hlToken; };
@@ -1407,13 +1447,18 @@
        끝내는 것이 아니라 자리를 기억해 두었다가 카드를 닫으면 이어 간다. */
     hlPause();
     lastFocus = document.activeElement;
-    Scenes.duck(true);          /* 영상 소리와 발음이 겹치면 둘 다 안 들린다 */
+    /* 영상 소리는 끈다. duck(true) 만 부르면 기본값 0.08 로 '올라가' 버린다 —
+       본문을 읽는 동안에는 이미 0 이었으므로, 낱말을 누르는 순간 영상 소리가
+       되살아났다. 크기를 직접 못박는다. */
+    Scenes.duck(true, 0);
     $('#scrim').classList.add('on');
     $('#m-say').onclick = sayCard;
     $('#m-close').focus();
   }
   function closeModal() {
-    Scenes.duck(false);
+    /* 책을 편 채였으면 낭독으로 돌아간다 — 영상 소리를 되살리면 안 된다.
+       duck(false) 는 원래 크기까지 올려 버린다. */
+    if (flowOpen() && hlOn) Scenes.duck(true, 0); else Scenes.duck(false);
     Voice.stop();
     TTS.stop();
     $('#scrim').classList.remove('on');
