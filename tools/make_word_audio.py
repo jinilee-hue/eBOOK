@@ -40,8 +40,9 @@ TRIM = ('silenceremove=start_periods=1:start_threshold=-40dB:start_silence=0.03,
 
 # 낱말마다 크기를 같게 맞춘다. 눌러 보는 낱말끼리 소리가 들쭉날쭉하면
 # 크게 들리는 낱말만 또렷하게 들린다 (잘라 쓰던 시절 편차가 37 dB 였다).
-MEAN_TARGET = -18.0     # 평균 크기
-PEAK_CEIL   = -1.5      # 이보다 큰 봉우리는 만들지 않는다
+MEAN_TARGET = -15.4     # 평균 크기. 본문 낭독(assets/audio)의 평균에 맞춘다 —
+                        # 낮게 잡으면 낱말만 작게 들린다 (전에 3.1 dB 작았다)
+PEAK_CEIL   = -1.0      # 이보다 큰 봉우리는 만들지 않는다
 
 # 한 음절에 이 정도면 또박또박하면서 늘어지지 않는다
 SEC_PER_SYL = 0.42
