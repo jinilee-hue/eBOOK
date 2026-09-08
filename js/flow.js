@@ -810,6 +810,7 @@
      이걸 안 들고 있으면 카드를 닫을 때마다 처음으로 되감겼다 — 읽던 데까지
      칠해진 하이라이트가 지워지고, 이미 읽은 데를 다시 읽어 겹쳐 들렸다. */
   var hlPaused = null;
+  var hlLastT = 0;       /* 마지막으로 읽던 자리(초) */
 
   function hlStopRead() {
     flowReadKey = '';
@@ -872,12 +873,21 @@
     if (!first || !last) return false;
 
     hlMode('file');
+    var startAt = (fromT != null && fromT > first.t && fromT < last.t1) ? fromT : first.t;
+    if (fromT != null) {
+      console.info('[따라 읽기] ' + startAt.toFixed(1) + '초부터 이어 읽습니다' +
+                   (startAt === first.t ? ' (자리를 못 찾아 처음부터)' : ''));
+    }
     return Voice.play(n, {
       /* 이어 읽기 — 카드를 닫고 돌아온 자리. 구간 밖이면 처음부터 */
-      from: (fromT != null && fromT > first.t && fromT < last.t1) ? fromT : first.t,
+      from: startAt,
       to: last.t1 + 0.15,
       onWord: function (i, c) {
         if (!live()) return;
+        /* 지금 어디를 읽고 있는지 계속 적어 둔다. 낱말 카드를 열 때
+           Voice.time 을 바로 못 읽는 경우가 있어(이미 멈춰 있거나 내장 음성으로
+           읽는 중) 그때는 이 값을 쓴다. */
+        hlLastT = Voice.time || hlLastT;
         hlPaintPageC(c);
       },
       onEnd: function (ok) {
@@ -893,8 +903,11 @@
   /* 낭독을 멈추되 어디까지 읽었는지는 남긴다. 하이라이트도 지우지 않는다 —
      어디까지 읽었는지 보여야 이어지는 느낌이 난다. */
   function hlPause() {
-    if (!hlOn || !Voice.playing || !flowReadKey) { hlPaused = null; Voice.stop(); return; }
-    hlPaused = { key: flowReadKey, t: Voice.time };
+    /* 재생 중이 아니어도 기억한다 — 카드를 열기 직전에 무엇이 먼저 멈춰
+       세웠을 수 있다. 그때 자리를 버리면 닫을 때 처음부터 다시 읽는다. */
+    var t = (Voice.playing ? Voice.time : 0) || hlLastT;
+    if (!hlOn || !flowReadKey || !(t > 0.05)) { hlPaused = null; Voice.stop(); return; }
+    hlPaused = { key: flowReadKey, t: t };
     Voice.stop();
     $('#app').dataset.hl = 'on';      /* '읽는 중' 표시만 내린다 */
   }
@@ -932,6 +945,7 @@
     var from = pi, fromBi = bi, mine = ++hlToken;
     var live = function () { return hlOn && pi === from && bi === fromBi && mine === hlToken; };
 
+    hlLastT = fromT || 0;
     hlScan();
     if (fromT == null) hlClear();     /* 이어 읽을 때는 칠해 둔 것을 지우지 않는다 */
     $('#app').dataset.hl = 'reading';
