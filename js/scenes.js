@@ -911,8 +911,16 @@ window.MOC.Scenes = (function () {
 
   function keys() { return Object.keys(S); }
 
+  /* 지금 쪽의 영상이 어디까지 갔나. 없으면(아직 못 붙였거나 절차적 씬이면) null.
+
+     밖에서 document.querySelector('#bg video') 로 찾으면 안 된다. 쪽을 넘기는
+     동안에는 #bg 안에 <video> 가 둘이다 — 나가는 쪽이 앞에 있고 FADE_MS+60 만큼
+     더 머문다. 그걸 잡으면 지난 쪽의 끝 시각을 지금 쪽 시각으로 읽는다.
+     playingEl 은 retire 에서 바로 null 이 되므로 그런 착각이 없다. */
+  function videoTime() { return playingEl ? playingEl.currentTime : null; }
+
   return { mount: mount, show: show, keys: keys, reduced: REDUCED, hold: hold,
-           setAudio: setAudio, duck: duck, hasVideo: hasVideo,
+           setAudio: setAudio, duck: duck, hasVideo: hasVideo, videoTime: videoTime,
            get audioOn() { return audioOn; },
            status: function () { return status; } };
 })();

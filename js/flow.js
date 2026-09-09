@@ -222,12 +222,23 @@
     var at = slotAt(PAGES[pi].n);
     if (at === null || flowOpen()) return;
     var from = pi, t0 = Date.now();
+    var wantVideo = !!PAGES[from].video;
     slotTimer = setInterval(function () {
       if (pi !== from || slotDone || flowOpen()) { clearInterval(slotTimer); slotTimer = 0; return; }
-      /* 영상이 있으면 그 재생 위치를, 없으면(못 읽었을 때) 시계를 쓴다.
-         영상 요소만 보고 있으면 영상이 안 뜨는 기기에서 요약이 영영 안 나온다. */
-      var v = document.querySelector('#bg video');
-      var t = v ? v.currentTime : (Date.now() - t0) / 1000;
+      /* 지금 쪽의 영상이 어디까지 갔나.
+
+         전에는 document.querySelector('#bg video') 로 찾았다. 쪽을 넘기는 동안
+         #bg 안에는 <video> 가 둘이고 나가는 쪽이 앞에 있어, 처음 860ms 동안
+         지난 쪽의 끝 시각(≈영상 길이)을 읽었다. 그 값은 어떤 자리보다도 커서
+         요약이 제 자리가 아니라 쪽 첫머리에 터졌다. 새 영상 디코딩이 그보다
+         빨리 끝나면 멀쩡했으므로 "나왔다 안 나왔다" 하는 것으로 보였다. */
+      var vt = Scenes.videoTime();
+      var t;
+      if (vt !== null) t = vt;
+      /* 아직 영상을 못 붙였다. 시계로 갈아타면 자리가 앞으로 밀리므로 기다린다 —
+         다만 영영 기다리지는 않는다. scenes.js 가 6초에 포기하므로 그보다 조금 뒤. */
+      else if (wantVideo && Date.now() - t0 < 6500) return;
+      else t = (Date.now() - t0) / 1000;
       if (t < at) return;
       slotDone = true;
       clearInterval(slotTimer);
@@ -912,13 +923,25 @@
     $('#app').dataset.hl = 'on';      /* '읽는 중' 표시만 내린다 */
   }
 
-  /* 멈춘 자리에서 이어 읽는다. 이어 읽을 것이 없으면 false */
+  /* 멈춘 자리에서 이어 읽는다. 이어 읽을 것이 없으면 false.
+
+     자리는 '실제로 이어 읽기 시작했을 때만' 지운다. 먼저 지우고 나서 못 읽고
+     돌아가면 그 뒤로는 아무도 이어 갈 수 없다 — 낱말 카드가 바로 그랬다.
+     처음 누르는 낱말은 wbAdd → relayout 이 한 프레임 뒤에 rebuild → showBeat →
+     hlRead 로 여기까지 오는데, 그때는 카드가 열려 있어 읽지 못한다. 그런데도
+     자리를 버려서, 카드를 닫을 때 이어 갈 것이 없어 처음부터 다시 읽었다.
+     (단어장에 이미 있는 낱말은 relayout 이 없어 멀쩡했다 — 그래서 눈에 덜 띄었다) */
   function hlResume() {
     var p = hlPaused;
-    hlPaused = null;
     if (!p || !hlOn || !started || atEnd) return false;
-    if (p.key !== pi + ':' + bi) return false;
-    return hlReadAt(p.t);
+    /* 다른 쪽·다른 구간으로 옮겨 왔다. 이 자리는 더 쓸 데가 없다 */
+    if (p.key !== pi + ':' + bi) { hlPaused = null; return false; }
+    /* 카드가 열려 있는 동안에는 읽지 않는다. 자리는 그대로 둔다 —
+       카드를 닫을 때 closeModal 이 다시 부른다. */
+    if (cardOpen()) return false;
+    if (!hlReadAt(p.t)) return false;
+    hlPaused = null;
+    return true;
   }
 
   /* fromT 를 주면 그 자리부터, 안 주면 이 구간 처음부터 */
